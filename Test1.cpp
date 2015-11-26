@@ -15,7 +15,7 @@ int _tmain(int argc, _TCHAR* argv[]){
 	//Variables
 	const int J = 10; //number of convertor loads to do
 	const int I = 10; // number of available types
-	// constants also possible using #define const value
+	// constants also possible using #define 'var name' 'value'
 	double c[I]; // cost of scrap type i
 	double V[I][2]; //loading speed
 	double t[J][2]; // time to fill spoon for load j at place k
