@@ -2,7 +2,7 @@
 //
 
 #include "stdafx.h"
-using solver;
+#using solver;
 
 
 int _tmain(int argc, _TCHAR* argv[]){
