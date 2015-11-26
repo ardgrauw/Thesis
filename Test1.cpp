@@ -4,12 +4,18 @@
 #include "stdafx.h"
 #include <C:\Ilog\include\ilcplex\ilocplex.h> 
 
+//idea for multiple dimensions
+//typedef IloArray<IloNumArray> Xjk;
+//typedef IloArray<Xjk> Xijk;
+//typedef IloArray<Xijk> Xijkl; //xijkl[l][i][j][k]
+
 
 
 int _tmain(int argc, _TCHAR* argv[]){
 	//Variables
 	const int J = 10; //number of convertor loads to do
 	const int I = 10; // number of available types
+	// constants also possible using #define const value
 	double c[I]; // cost of scrap type i
 	double V[I][2]; //loading speed
 	double t[J][2]; // time to fill spoon for load j at place k
@@ -50,9 +56,10 @@ int _tmain(int argc, _TCHAR* argv[]){
 	IloEnv env;
 	IloModel model(env);
 	IloExpr expr(env);
-	for (int i = 0; i < I; ++i){
-		for (int j = 0; j < J; ++j){
-			for (int k = 0; k < 2; ++k){
+	//gebruik IloInt in de for-loops?!?
+	for (IloInt i = 0; i < I; ++i){
+		for (IloInt j = 0; j < J; ++j){
+			for (IloInt k = 0; k < 2; ++k){
 				IloNumVar w[i][j][k](env, 0, 50, ILOFLOAT);
 				IloNumVar y[i][j][k](env, 0, 1, ILOBOOL);
 				expr += w[i][j][k] * y[i][j][k] * c[i];
@@ -65,9 +72,9 @@ int _tmain(int argc, _TCHAR* argv[]){
 	expr.end();
 
 	//Add constraints
-	for (int i = 0; i < I; ++i){
-		for (int j = 0; j < J; ++j){
-			for (int k = 0; k < 2; ++k){
+	for (IloInt i = 0; i < I; ++i){
+		for (IloInt j = 0; j < J; ++j){
+			for (IloInt k = 0; k < 2; ++k){
 				IloRange bigM[i][j][k](env, 0.3 * y[i][j][k], w[i][j][k], 50 * y[i][j][k]);
 				IloRange stock[i][j][k](env, 0.0, w[i][j][k], A[i][j][k]);
 				model.add(bigM[i][j][k]); model.add(stock[i][j][k]);
@@ -75,13 +82,13 @@ int _tmain(int argc, _TCHAR* argv[]){
 		}
 	}
 	
-	for (int k = 0; k < 2; ++k){
-		for (int j = 0; j < J; ++j){
+	for (IloInt k = 0; k < 2; ++k){
+		for (IloInt j = 0; j < J; ++j){
 			IloExpr tijd(env);
 			IloExpr gewicht(env);
 			IloExpr volume(env);
 			IloExpr types(env);
-			for (int i = 0; i < I; ++i){
+			for (IloInt i = 0; i < I; ++i){
 				tijd += w[i][j][k] * V[i][k];
 				gewicht += w[i][j][k];
 				volume += w[i][j][k] * rho[i];
@@ -96,12 +103,12 @@ int _tmain(int argc, _TCHAR* argv[]){
 		}
 	}
 
-	for (int j = 0; j < J; ++j){
+	for (IloInt j = 0; j < J; ++j){
 		IloExpr gewicht(env);
 		IloExpr residuelen(env);
 		IloExpr zwavel(env);
-		for (int i = 0; i < I; ++i){
-			for (int k = 0; k < 2; ++k){
+		for (IloInt i = 0; i < I; ++i){
+			for (IloInt k = 0; k < 2; ++k){
 				gewicht += w[i][j][k];
 				residuelen += w[i][j][k] * R[i];
 				zwavel += w[i][j][k] * S[i];
@@ -115,10 +122,10 @@ int _tmain(int argc, _TCHAR* argv[]){
 	}
 
 	//A initialiseren (nog steeds constraint)
-	for (int i = 0; i < I; ++i){
-		for (int k = 0; k < 2; ++k){
+	for (IloInt i = 0; i < I; ++i){
+		for (IloInt k = 0; k < 2; ++k){
 			A[i][0][k] = AStart[i][k];
-			for (int j = 0; j < J; ++j){
+			for (IloInt j = 0; j < J; ++j){
 				A[i][j][k] = A[i][j - 1][k] - w[i][j - 1][k];
 				IloRange Stock[i][j][k](env, 0.0, w[i][j][k], A[i][j][k]);
 				model.add(Stock[i][j][k]);
