@@ -2,7 +2,8 @@
 //
 
 #include "stdafx.h"
-#using solver.lib;
+#include <C:\Ilog\include\ilcplex\ilocplex.h> 
+
 
 
 int _tmain(int argc, _TCHAR* argv[]){
@@ -19,17 +20,30 @@ int _tmain(int argc, _TCHAR* argv[]){
 	double Su[J]; // allowed quantity of sulfur in load j
 	double A[I][J][2]; // stock levels at the start of load J for type i at place k
 	double AStart[I][2]; // initial stock levels
+	double totalWeight[J]; // total weight for load j
+	double W; // weight capacity for a spoon
+	double V; // volume capacity for a spoon
+	double Y; // number of types that the system can handle
 
 	//test variables
-	V = { { 1, 1 }, { 1, 1 }, { 1, 1 }, { 1, 1 }, { 1, 1 }, { 1, 1 }, { 1, 1 }, { 1, 1 }, { 1, 1 }, { 1, 1 } };
-	t = { { 50, 50 }, { 50, 50 }, { 50, 50 }, { 50, 50 }, { 50, 50 }, { 50, 50 }, { 50, 50 }, { 50, 50 }, { 50, 50 }, { 50, 50 } };
-	rho = { 0, 0, 0, 0, 0, 0, 0, 0, 0, 0 };
-	R = { 0, 0, 0, 0, 0, 0, 0, 0, 0, 0 };
-	S = { 0, 0, 0, 0, 0, 0, 0, 0, 0, 0 };
-	Re = { 0, 0, 0, 0, 0, 0, 0, 0, 0, 0 };
-	Su = { 0, 0, 0, 0, 0, 0, 0, 0, 0, 0 };
-	Astart = { { 1000, 1000 }, { 1000, 1000 }, { 1000, 1000 }, { 1000, 1000 }, { 1000, 1000 }, { 1000, 1000 }, { 1000, 1000 }, { 1000, 1000 }, { 1000, 1000 }, { 1000, 1000 } };
-	c = { 1, 2, 3, 4, 5, 6, 7, 8, 9, 10 };
+	for (int i = 0; i < I; ++i){
+		c[i] = i + 1;
+		rho[i] = 0;
+		R[i] = 1;
+		S[i] = 1;
+		for (int k = 0; k < 2; ++k){
+			V[i][k] = 1;
+			AStart[i][k] = 1000;
+		}
+	}
+	for (int j = 0; j < J; ++j){
+		Re[j] = 30;
+		Su[j] = 30;
+		for (int k = 0; k < 2; ++k){
+			t[j][k] = 50;
+		}
+	}
+	
 
 	
 	//make decision variables for subproblem and add to objective function
@@ -93,7 +107,7 @@ int _tmain(int argc, _TCHAR* argv[]){
 				zwavel += w[i][j][k] * S[i];
 			}
 		}
-		IloRange Gewicht[j](env, W[j], gewicht, W[j]);
+		IloRange Gewicht[j](env, W[j], gewicht, totalWeight[j]);
 		IloRange Residuelen[j](env, 0.0, residuelen, Re[j]);
 		IloRange Zwavel[j](env, 0.0, zwavel, Su[j]);
 		model.add(Gewicht[j]); model.add(Residuelen[j]); model.add(Zwavel[j]);
