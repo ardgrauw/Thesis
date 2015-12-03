@@ -4,12 +4,14 @@
 //Change directory naar cplex/include (en niet verder!)
 #include "stdafx.h"
 #include <ilcplex/ilocplex.h> 
+#include <iostream>;
 
 //idea for multiple dimensions
 //typedef IloArray<IloNumArray> Xjk;
 //typedef IloArray<Xjk> Xijk;
 //typedef IloArray<Xijk> Xijkl; //xijkl[l][i][j][k]
-//from IBM
+
+//from IBM site:
 typedef IloArray<IloNumVarArray> NumVarMatrix;
 typedef IloArray<NumVarMatrix>   NumVar3Matrix;
 typedef IloArray<IloRangeArray> RangeMatrix;
@@ -157,9 +159,12 @@ int _tmain(int argc, _TCHAR* argv[]){
 			Stock[i][k] = IloConstraintArray(env, J);
 			Av[i][k] = IloConstraintArray(env, J+1);
 			Av[i][k][0] = IloConstraint(Av[i][k][0] == AStart[i][k]);
+			Stock[i][k][0] = IloConstraint(w[i][0][k] <= Av[i][k][0]);
 			for (IloInt j = 1; j < J+1; ++j){
-				Av[i][j][k] = IloConstraint(Av[i][j][k] == Av[i][j - 1][k] - w[i][j - 1][k]);
-				Stock[i][k][j] = IloConstraint(w[i][j][k] <= A[i][j][k]);
+				Av[i][j][k] = IloConstraint(Av[i][j][k] == Av[i][k][j - 1] - w[i][j - 1][k]);
+				if (j != J + 1){
+					Stock[i][k][j] = IloConstraint(w[i][j][k] <= Av[i][k][j]);
+				}				
 				model.add(Stock[i][j][k]);
 			}
 		}
@@ -167,8 +172,12 @@ int _tmain(int argc, _TCHAR* argv[]){
 
 
 	//solve the model
-	IloCplex(model);
-	IloSolve;
+	IloCplex cplex(model);
+	cplex.solve();
+
+	//output
+	env.out() << "Solution status = " << cplex.getStatus();
+	env.out() << "Solution value  = " << cplex.getObjValue();
 
 	env.end();
 	
