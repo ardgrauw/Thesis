@@ -25,23 +25,35 @@
 #include <ilcplex/ilocplex.h>
 ILOSTLBEGIN
 
+//typedef om ook matrices to kunnen gebruiken (gemakkelijker dan enkel arrays te gebruiken)
+typedef IloArray<IloNumVarArray> NumVarMatrix;
+typedef IloArray<NumVarMatrix>   NumVar3Matrix;
+typedef IloArray<IloRangeArray> RangeMatrix;
+typedef IloArray<RangeMatrix> Range3Matrix;
+typedef IloArray<IloConstraintArray> ConstraintMatrix;
+typedef IloArray<ConstraintMatrix> Constraint3Matrix;
+
 //paar testvariabelen
-const int S = 30;
-const int I = 10;
-const int s[10] = { 3, 4, 2, 5, 2, 6, 1, 5, 4, 3 };
-const int cost[10] = { 3, 2, 4, 1, 4, 0, 5, 4, 3, 3 };
-const int X = 10;
+const int S[10] = { 20, 30, 40, 25, 35, 30, 15, 60, 50, 35 }; //example of sulfur max
+const int W[10] = { 10, 10, 10, 10, 10, 10, 10, 10, 10, 10 }; //needed weight
+const int I = 10; // number of scrap types
+const int J = 10; // number of convertor loads
+const int K = 1; // number of stocks to implement
+const int T = 10; //number of time variables
+const int s[10] = { 3, 4, 2, 5, 2, 6, 1, 5, 4, 3 }; //example of sulfur concentration 
+const int cost[10] = { 3, 2, 4, 1, 4, 0, 5, 4, 3, 3 }; // example of cost function
 
 
 
-static void
-usage(const char *progname),
-populatebyrow(IloModel model, IloNumVarArray var, IloRangeArray con),
-populatebycolumn(IloModel model, IloNumVarArray var, IloRangeArray con),
-populatebynonzero(IloModel model, IloNumVarArray var, IloRangeArray con);
+
+static void populatebynonzero(IloModel model, IloNumVarArray var, IloRangeArray con);
+static void populatebynonzero(IloModel model,
+		NumVar3Matrix varW, NumVar3Matrix varY, NumVar3Matrix varX, NumVar3Matrix varT, NumVar3Matrix varA,
+		RangeMatrix con);
+
 
 int
-main(int argc, char **argv)
+main(int argc)
 {
 	
 
@@ -49,28 +61,16 @@ main(int argc, char **argv)
 	try {
 		IloModel model(env);
 
-		/* if ((argc != 2) ||
-			(argv[1][0] != '-') ||
-			(strchr("rcn", argv[1][1]) == NULL)) {
-			usage(argv[0]);
-			throw(-1);
-		}*/
-
 		IloNumVarArray var(env);
+		NumVar3Matrix varW(env);
+		NumVar3Matrix varY(env);
+		NumVar3Matrix varX(env);
+		NumVar3Matrix varT(env);
+		NumVar3Matrix varA(env);
 		IloRangeArray con(env);
+		RangeMatrix c(env);
 
-		/* switch (argv[1][1]) {
-		case 'r':
-			populatebyrow(model, var, con);
-			break;
-		case 'c':
-			populatebycolumn(model, var, con);
-			break;
-		case 'n':
-			populatebynonzero(model, var, con);
-			break;
-		}*/
-		populatebynonzero(model, var, con);
+		populatebynonzero(model, varW, varY, varX, varT, varA, c);
 
 		IloCplex cplex(model);
 
@@ -83,8 +83,14 @@ main(int argc, char **argv)
 		IloNumArray vals(env);
 		env.out() << "Solution status = " << cplex.getStatus() << endl;
 		env.out() << "Solution value  = " << cplex.getObjValue() << endl;
-		cplex.getValues(vals, var);
-		env.out() << "Values        = " << vals << endl;
+		for (int i = 0; i < I; i++)
+		{
+			for (int j = 0; j < J; j++)
+			{
+				cplex.getValues(vals, varW[i][j]);
+				env.out() << "Values        = " << vals << endl;
+			}
+		}
 		cplex.getSlacks(vals, con);
 		env.out() << "Slacks        = " << vals << endl;
 		cplex.getDuals(vals, con);
@@ -102,67 +108,111 @@ main(int argc, char **argv)
 	}
 
 	env.end();
-
+	cin.get();
 	return 0;
 }  // END main
 
-
-static void usage(const char *progname)
-{
-	cerr << "Usage: " << progname << " -X" << endl;
-	cerr << "   where X is one of the following options:" << endl;
-	cerr << "      r          generate problem by row" << endl;
-	cerr << "      c          generate problem by column" << endl;
-	cerr << "      n          generate problem by nonzero" << endl;
-	cerr << " Exiting..." << endl;
-} // END usage
-
-
-// To populate by row, we first create the variables, and then use them to
-// create the range constraints and objective.
+// populatebynonzero will define the whole problem,
+// it enters the objective function, constraints and variables into the model
 
 static void
-populatebyrow(IloModel model, IloNumVarArray x, IloRangeArray c)
+populatebynonzero(IloModel model,
+NumVar3Matrix varW, NumVar3Matrix varY, NumVar3Matrix varX, NumVar3Matrix varT, NumVar3Matrix varA,
+RangeMatrix con)
 {
+	void populateR(IloModel model, NumVar3Matrix var),
+		populateB(IloModel model, NumVar3Matrix var),
+		populateT(IloModel model, NumVar3Matrix var);
+
 	IloEnv env = model.getEnv();
 
-	x.add(IloNumVar(env, 0.0, 40.0));
-	x.add(IloNumVar(env));
-	x.add(IloNumVar(env));
-	model.add(IloMaximize(env, x[0] + 2 * x[1] + 3 * x[2]));
+	IloObjective obj = IloMinimize(env); //minimization function
 
-	c.add(-x[0] + x[1] + x[2] <= 20);
-	c.add(x[0] - 3 * x[1] + x[2] <= 30);
-	model.add(c);
+	populateR(model, varW);
+	populateR(model, varX);
+	populateR(model, varA);
+	populateB(model, varY);
+	populateT(model, varT);
 
-}  // END populatebyrow
+	for (int j = 0; j < J; j++)
+	{
+		con[j][0] = IloRange(env, -IloInfinity, S[j]);
+		con[j][1] = IloRange(env, W[j], W[j]);
 
+		for (int i = 0; i < I; i++)
+		{
+			for (int k = 0; k < K; k++)
+			{
+				obj.setLinearCoef(varW[i][j][k], cost[i]);
+				con[j][0].setLinearCoef(varW[i][j][k], s[i]);
+				con[j][1].setLinearCoef(varW[i][j][k], 1.0);
+			}
+		}
 
-// To populate by column, we first create the range constraints and the
-// objective, and then create the variables and add them to the ranges and
-// objective using column expressions.
-
-static void
-populatebycolumn(IloModel model, IloNumVarArray x, IloRangeArray c)
-{
-	IloEnv env = model.getEnv();
-
-	IloObjective obj = IloMaximize(env);
-	c.add(IloRange(env, -IloInfinity, 20.0));
-	c.add(IloRange(env, -IloInfinity, 30.0));
-
-	x.add(IloNumVar(obj(1.0) + c[0](-1.0) + c[1](1.0), 0.0, 40.0));
-	x.add(IloNumVar(obj(2.0) + c[0](1.0) + c[1](-3.0)));
-	x.add(IloNumVar(obj(3.0) + c[0](1.0) + c[1](1.0)));
-
+		model.add(con[j]);
+	}
+	
 	model.add(obj);
-	model.add(c);
+	
 
-}  // END populatebycolumn
+}
+
+
+//function to insert real decision variables (but greater then or equal to 0)
+void
+populateR(IloModel model, NumVar3Matrix var)
+{
+	IloEnv env = model.getEnv();
+	for (int i = 0; i < I; i++)
+	{
+		for (int j = 0; j < J; j++)
+		{
+			for (int k = 0; k < K; k++)
+			{
+				var[i][j].add(IloNumVar(env, 0.0, IloInfinity));
+			}
+		}
+	}
+}
+
+//function to insert binary decision variables 
+void
+populateB(IloModel model, NumVar3Matrix var)
+{
+	IloEnv env = model.getEnv();
+	for (int i = 0; i < I; i++)
+	{
+		for (int j = 0; j < J; j++)
+		{
+			for (int k = 0; k < K; k++)
+			{
+				var[i][j][k] = IloIntVar(env, 0, 1);
+			}
+		}
+	}
+}
+
+//function to insert time decision variables 
+void
+populateT(IloModel model, NumVar3Matrix var)
+{
+	IloEnv env = model.getEnv();
+	for (int t = 0; t < T; t++)
+	{
+		for (int j = 0; j < J; j++)
+		{
+			for (int k = 0; k < K; k++)
+			{
+				var[t][j][k] = IloNumVar(env, 0.0, IloInfinity);
+			}
+		}
+	}
+}
 
 
 // To populate by nonzero, we first create the rows, then create the
 // columns, and then change the nonzeros of the matrix 1 at a time.
+// This is the standard function, test purposes only
 
 static void
 populatebynonzero(IloModel model, IloNumVarArray x, IloRangeArray c)
@@ -170,7 +220,7 @@ populatebynonzero(IloModel model, IloNumVarArray x, IloRangeArray c)
 	IloEnv env = model.getEnv();
 
 	IloObjective obj = IloMinimize(env); //minimization function
-	c.add(IloRange(env, -IloInfinity, S));
+	c.add(IloRange(env, -IloInfinity, S[1]));
 	c.add(IloRange(env, 10.0, 10.0));
 
 	for (int i = 0; i < I; ++i){
