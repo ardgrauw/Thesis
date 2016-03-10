@@ -1,26 +1,7 @@
-// Scrap.cpp : Defines the entry point for the console application.
+// Timing.cpp : Defines the entry point for the console application.
 //
 
 #include "stdafx.h"
-
-
-// -------------------------------------------------------------- -*- C++ -*-
-// File: examples/src/ilolpex1.cpp
-// Version 8.1
-// --------------------------------------------------------------------------
-//  Copyright (C) 1999-2002 by ILOG.
-//  All Rights Reserved.
-//  Permission is expressly granted to use this example in the
-//  course of developing applications that use ILOG products.
-// --------------------------------------------------------------------------
-//
-// ilolpex1.cpp - Entering and optimizing a problem.  Demonstrates different
-// methods for creating a problem.  The user has to choose the method
-// on the command line:
-//
-//    ilolpex1  -r     generates the problem by adding rows
-//    ilolpex1  -c     generates the problem by adding columns
-//    ilolpex1  -n     generates the problem by adding a list of coefficients
 
 #include <ilcplex/ilocplex.h>
 ILOSTLBEGIN
@@ -33,44 +14,66 @@ typedef IloArray<RangeMatrix> Range3Matrix;
 typedef IloArray<IloConstraintArray> ConstraintMatrix;
 typedef IloArray<ConstraintMatrix> Constraint3Matrix;
 
-//paar testvariabelen
-const int S[10] = { 20, 30, 40, 25, 35, 30, 15, 60, 50, 35 }; //example of sulfur max
-const int W[10] = { 10, 10, 10, 10, 10, 10, 10, 10, 10, 10 }; //needed weight
-const int I = 10; // number of scrap types
-const int J = 10; // number of convertor loads
-const int K = 1; // number of stocks to implement
-const int T = 10; //number of time variables
-const int s[10] = { 3, 4, 2, 5, 2, 6, 1, 5, 4, 3 }; //example of sulfur concentration 
-const int cost[10] = { 3, 2, 4, 1, 4, 0, 5, 4, 3, 3 }; // example of cost function
 
+static void populatebynonzero(IloModel model, NumVarMatrix varOutput, NumVar3Matrix varHelp, Range3Matrix con);
 
+const int J = 10; // how many loads should be considered
+const int K = 2; // number of spoons in 1 load, should always stay 2
+const int L = 6; // number of time variables to be considered
+static double Tslack = 180; //slack time or margin time for all spoons
+static int a[2] = { 2, 3 }; //differentiating between filling places for a certain constraint
+static int b[2] = { 1, 2 }; //differentiating between filling places for a certain constraint
 
+static double Tdc = 180; // driving time from drop-off to convertor (could be split up for both convertors)
+static double Tcd = 180; // driving time from convertor to drop-off (could be split up for both convertors)
+static double Tdf[2] = { 60, 300 }; // driving time from drop-off to the filling area (hall, dockside)
+static double Tfd[2] = { 60, 420 }; // driving time from the filling area to drop-off (hall, dockside)
+static double TlossD[2] = { 120, 180 }; // time lost between placing spoon at dropoff and picking up the next one
+static double TlossF[2] = { 0, 60 }; // time lost between finishing one spoon and starting the next at the dockside
 
-static void populatebynonzero(IloModel model, IloNumVarArray var, IloRangeArray con);
-static void populatebynonzero(IloModel model,
-		NumVar3Matrix varW, NumVar3Matrix varY, NumVar3Matrix varX, NumVar3Matrix varT, NumVar3Matrix varA,
-		RangeMatrix con);
-
+//test parameters
+int current = 4;
+static int T[15] = { 0, 1440, 2760, 5400, 6720, 8040, 9360, 10680, 12000, 13320, 15240, 16980, 18540, 20400, 21720 };
+static int Tblow[15] = { 60, 60, 60, 60, 60, 60, 60, 60, 60, 60, 60, 60, 60, 60, 60 };
 
 int
 main(int argc)
 {
-	
+
 
 	IloEnv   env;
 	try {
 		IloModel model(env);
 
-		IloNumVarArray var(env);
-		NumVar3Matrix varW(env);
-		NumVar3Matrix varY(env);
-		NumVar3Matrix varX(env);
-		NumVar3Matrix varT(env);
-		NumVar3Matrix varA(env);
-		IloRangeArray con(env);
-		RangeMatrix c(env);
+		NumVarMatrix varOutput(env, J + current);
+		NumVar3Matrix varHelp(env, J + current);
+		Range3Matrix cons(env, J + current);
+		for (int j = 0; j <J + current; j++){
+			varOutput[j] = IloNumVarArray(env, K);
+			varHelp[j] = NumVarMatrix(env, K);
+			cons[j] = RangeMatrix(env, K);
+			for (int k = 0; k < K; k++){
+				varOutput[j][k] = IloNumVar(env, 0.0, IloInfinity);
+				varHelp[j][k] = IloNumVarArray(env, L);
+				cons[j][k] = IloRangeArray(env, 10);
+				for (int l = 0; l < L; l++){
+					varHelp[j][k][l] = IloNumVar(env, 0.0, IloInfinity);
+				}
+				if (j > current){
+					cons[j][k][0] = IloRange(env, 0.0, 0.0);//will be used to express equality of varOutput, constraint (0)
+					cons[j][k][1] = IloRange(env, 0.0, IloInfinity);// constraint (1)
+					cons[j][k][2] = IloRange(env, -IloInfinity, T[j] - Tdc - Tblow[j] - Tslack);// constraint (2)
+					cons[j][k][3] = IloRange(env, Tfd[k], Tfd[k]);// constraint (3)
+					cons[j][k][4] = IloRange(env, 0.0, IloInfinity);// constraint (4)
+					cons[j][k][5] = IloRange(env, Tdf[k], IloInfinity);// constraint (5)
+					cons[j][k][6] = IloRange(env, T[j - a[k]] + Tcd, T[j - a[k]] + Tcd);// constraint (6)
+					cons[j][k][7] = IloRange(env, TlossD[k], IloInfinity);// constraint (7)
+					cons[j][k][8] = IloRange(env, TlossF[k], IloInfinity);// constraint (8)
+				}
+			}
+		}
 
-		populatebynonzero(model, varW, varY, varX, varT, varA, c);
+		populatebynonzero(model, varOutput, varHelp, cons);
 
 		IloCplex cplex(model);
 
@@ -83,20 +86,17 @@ main(int argc)
 		IloNumArray vals(env);
 		env.out() << "Solution status = " << cplex.getStatus() << endl;
 		env.out() << "Solution value  = " << cplex.getObjValue() << endl;
-		for (int i = 0; i < I; i++)
+		for (int j = current; j < current + J; ++j)
 		{
-			for (int j = 0; j < J; j++)
-			{
-				cplex.getValues(vals, varW[i][j]);
-				env.out() << "Values        = " << vals << endl;
-			}
+			cplex.getValues(vals, varOutput[j]);
+			env.out() << "Values        = " << vals << endl;
 		}
-		cplex.getSlacks(vals, con);
+		/*cplex.getSlacks(vals, cons);
 		env.out() << "Slacks        = " << vals << endl;
-		cplex.getDuals(vals, con);
+		cplex.getDuals(vals, cons);
 		env.out() << "Duals         = " << vals << endl;
-		cplex.getReducedCosts(vals, var);
-		env.out() << "Reduced Costs = " << vals << endl;
+		cplex.getReducedCosts(vals, varOutput);
+		env.out() << "Reduced Costs = " << vals << endl;*/
 
 		cplex.exportModel("lpex1.lp");
 	}
@@ -112,152 +112,83 @@ main(int argc)
 	return 0;
 }  // END main
 
-// populatebynonzero will define the whole problem,
-// it enters the objective function, constraints and variables into the model
 
 static void
-populatebynonzero(IloModel model,
-NumVar3Matrix varW, NumVar3Matrix varY, NumVar3Matrix varX, NumVar3Matrix varT, NumVar3Matrix varA,
-RangeMatrix con)
+populatebynonzero(IloModel model, NumVarMatrix varOutput, NumVar3Matrix varHelp, Range3Matrix con)
 {
-	void populateR(IloModel model, NumVar3Matrix var),
-		populateB(IloModel model, NumVar3Matrix var),
-		populateT(IloModel model, NumVar3Matrix var);
-
 	IloEnv env = model.getEnv();
 
-	IloObjective obj = IloMinimize(env); //minimization function
+	//IloObjective obj = IloMaximize(env); //maximization function
 
-	populateR(model, varW);
-	populateR(model, varX);
-	populateR(model, varA);
-	populateB(model, varY);
-	populateT(model, varT);
 
-	for (int j = 0; j < J; j++)
+	for (int j = current; j < current + J; ++j)
 	{
-		con[j][0] = IloRange(env, -IloInfinity, S[j]);
-		con[j][1] = IloRange(env, W[j], W[j]);
-
-		for (int i = 0; i < I; i++)
+		for (int k = 0; k < K; ++k)
 		{
-			for (int k = 0; k < K; k++)
-			{
-				obj.setLinearCoef(varW[i][j][k], cost[i]);
-				con[j][0].setLinearCoef(varW[i][j][k], s[i]);
-				con[j][1].setLinearCoef(varW[i][j][k], 1.0);
-			}
-		}
+			/*con[j][k].add(IloRange(env, 0.0, 0.0));//will be used to express equality of varOutput, constraint (0)
+			con[j][k].add(IloRange(env, 0.0, IloInfinity));// constraint (1)
+			con[j][k].add(IloRange(env, -IloInfinity, T[j] - Tdc - Tblow[j] - Tslack));// constraint (2)
+			con[j][k].add(IloRange(env, Tfd[k], Tfd[k]));// constraint (3)
+			con[j][k].add(IloRange(env, 0.0, IloInfinity));// constraint (4)
+			con[j][k].add(IloRange(env, Tdf[k], IloInfinity));// constraint (5)
+			con[j][k].add(IloRange(env, T[j - a[k]] + Tcd, T[j - a[k]] + Tcd));// constraint (6)
+			con[j][k].add(IloRange(env, TlossD[k], IloInfinity));// constraint (7)
+			con[j][k].add(IloRange(env, TlossF[k], IloInfinity));// constraint (8)*/
 
-		model.add(con[j]);
+			//varOutput[j].add(IloNumVar(env, 0.0, IloInfinity));//create decision variabes for available time
+			//obj.setLinearCoef(varOutput[j][k], 1.0);//add all variables to objective function, factor 1 
+			model.add(IloMaximize(env, IloSum(varOutput[j])));
+
+
+			for (int l = 0; l < L; ++l)
+			{
+				//varHelp[j][k].add(IloNumVar(env, 0.0, IloInfinity));//define instances in time as variables as well
+				//no need to include these in the objective function
+
+			}
+
+			//constraint 0: express value of output objective variables
+			//con[j][k][0].setLinearCoef(varOutput[j][k], 1.0);
+			//con[j][k][0].setLinearCoef(varHelp[j][k][3], -1.0);
+			//con[j][k][0].setLinearCoef(varHelp[j][k][2], 1.0);
+			model.add(varOutput[j][k] + varHelp[j][k][2] - varHelp[j][k][3] == 0);
+
+			//constraint 1: Td2a>=+Td2b
+			con[j][k][1].setLinearCoef(varHelp[j][k][4], -1.0);
+			con[j][k][1].setLinearCoef(varHelp[j][k][5], 1.0);
+
+			//constraint 2: Tj>=Td2a + Tdc + Tblow
+			con[j][k][2].setLinearCoef(varHelp[j][k][5], 1.0);
+
+			//constraint 3: Td2b = Tfa+Tfd
+			con[j][k][3].setLinearCoef(varHelp[j][k][4], 1.0);
+			con[j][k][3].setLinearCoef(varHelp[j][k][3], -1.0);
+
+			//constraint 4: Td1a >= Td1b
+			con[j][k][4].setLinearCoef(varHelp[j][k][1], 1.0);
+			con[j][k][4].setLinearCoef(varHelp[j][k][0], -1.0);
+
+			//constraint 5: Tfb >= Td1a+Tdf
+			con[j][k][5].setLinearCoef(varHelp[j][k][2], 1.0);
+			con[j][k][5].setLinearCoef(varHelp[j][k][1], -1.0);
+
+			//constraint 6: Td1b = T(j-a)+Tcd
+			con[j][k][6].setLinearCoef(varHelp[j][k][0], 1.0);
+
+			//constraint 7: Td1a >= Td2b(j-b) + Tloss, 1
+			con[j][k][7].setLinearCoef(varHelp[j][k][1], 1.0);
+			con[j][k][7].setLinearCoef(varHelp[j - b[k]][k][4], -1.0);
+
+			//constraint 8: Tfb >= Tfa(j-1)+Tloss, 2
+			con[j][k][8].setLinearCoef(varHelp[j][k][2], 1.0);
+			con[j][k][8].setLinearCoef(varHelp[j - 1][k][3], -1.0);
+
+			model.add(con[j][k]);
+		}
+		//obj.setLinearCoefs(varOutput[j]);//add all variables to objective function, factor 1
 	}
+
+	//model.add(obj);
 	
-	model.add(obj);
-	
 
 }
-
-
-//function to insert real decision variables (but greater then or equal to 0)
-void
-populateR(IloModel model, NumVar3Matrix var)
-{
-	IloEnv env = model.getEnv();
-	for (int i = 0; i < I; i++)
-	{
-		for (int j = 0; j < J; j++)
-		{
-			for (int k = 0; k < K; k++)
-			{
-				var[i][j].add(IloNumVar(env, 0.0, IloInfinity));
-			}
-		}
-	}
-}
-
-//function to insert binary decision variables 
-void
-populateB(IloModel model, NumVar3Matrix var)
-{
-	IloEnv env = model.getEnv();
-	for (int i = 0; i < I; i++)
-	{
-		for (int j = 0; j < J; j++)
-		{
-			for (int k = 0; k < K; k++)
-			{
-				var[i][j][k] = IloIntVar(env, 0, 1);
-			}
-		}
-	}
-}
-
-//function to insert time decision variables 
-void
-populateT(IloModel model, NumVar3Matrix var)
-{
-	IloEnv env = model.getEnv();
-	for (int t = 0; t < T; t++)
-	{
-		for (int j = 0; j < J; j++)
-		{
-			for (int k = 0; k < K; k++)
-			{
-				var[t][j][k] = IloNumVar(env, 0.0, IloInfinity);
-			}
-		}
-	}
-}
-
-
-// To populate by nonzero, we first create the rows, then create the
-// columns, and then change the nonzeros of the matrix 1 at a time.
-// This is the standard function, test purposes only
-
-static void
-populatebynonzero(IloModel model, IloNumVarArray x, IloRangeArray c)
-{
-	IloEnv env = model.getEnv();
-
-	IloObjective obj = IloMinimize(env); //minimization function
-	c.add(IloRange(env, -IloInfinity, S[1]));
-	c.add(IloRange(env, 10.0, 10.0));
-
-	for (int i = 0; i < I; ++i){
-		x.add(IloNumVar(env, 0.0, IloInfinity));
-	}
-
-	for (int i = 0; i < I; ++i){
-		obj.setLinearCoef(x[i], cost[i]);
-		c[0].setLinearCoef(x[i], s[i]);
-		c[1].setLinearCoef(x[i], 1.0);
-	}
-
-	model.add(obj);
-	model.add(c);
-
-	/* IloObjective obj = IloMaximize(env);
-	c.add(IloRange(env, -IloInfinity, 20.0));
-	c.add(IloRange(env, -IloInfinity, 30.0));
-
-	x.add(IloNumVar(env, 0.0, 40.0));
-	x.add(IloNumVar(env));
-	x.add(IloNumVar(env));
-
-	obj.setLinearCoef(x[0], 1.0);
-	obj.setLinearCoef(x[1], 2.0);
-	obj.setLinearCoef(x[2], 3.0);
-
-	c[0].setLinearCoef(x[0], -1.0);
-	c[0].setLinearCoef(x[1], 1.0);
-	c[0].setLinearCoef(x[2], 1.0);
-	c[1].setLinearCoef(x[0], 1.0);
-	c[1].setLinearCoef(x[1], -3.0);
-	c[1].setLinearCoef(x[2], 1.0);
-
-	model.add(obj);
-	model.add(c); */
-
-}  // END populatebynonzero
-
-
