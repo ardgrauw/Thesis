@@ -9,6 +9,7 @@ ILOSTLBEGIN
 //typedef om ook matrices to kunnen gebruiken (gemakkelijker dan enkel arrays te gebruiken)
 typedef IloArray<IloNumVarArray> NumVarMatrix;
 typedef IloArray<NumVarMatrix>   NumVar3Matrix;
+typedef IloArray<NumVar3Matrix> NumVar4Matrix;
 typedef IloArray<IloRangeArray> RangeMatrix;
 typedef IloArray<RangeMatrix> Range3Matrix;
 typedef IloArray<IloConstraintArray> ConstraintMatrix;
@@ -16,7 +17,7 @@ typedef IloArray<ConstraintMatrix> Constraint3Matrix;
 //test
 
 
-static void populatebynonzero(IloModel model, NumVarMatrix varOutput, NumVar3Matrix varHelp, Range3Matrix con);
+static void populatebynonzero(IloModel model, NumVarMatrix varOutput, NumVar3Matrix varHelp, Range3Matrix con, NumVar4Matrix output);
 
 const int J = 10; // how many loads should be considered
 const int K = 2; // number of spoons in 1 load, should always stay 2
@@ -39,6 +40,10 @@ int current = 4;
 static int T[15] = { 0, 1440, 2760, 5400, 6720, 8040, 9360, 10680, 12000, 13320, 15240, 16980, 18540, 20400, 21720 };
 static int Tblow[15] = { 60, 60, 60, 60, 60, 60, 60, 60, 60, 60, 60, 60, 60, 60, 60 };
 
+//output parameters
+const int o = 5;
+static string out[o] = { "LK103", "LK106", "Terberg1", "Terberg2", "MobileCrane" };
+
 int
 main(int argc)
 {
@@ -51,32 +56,12 @@ main(int argc)
 		NumVarMatrix varOutput(env, J + current);
 		NumVar3Matrix varHelp(env, J + current);
 		Range3Matrix cons(env, J + current);
-		for (int j = 0; j <J + current; j++){
-			varOutput[j] = IloNumVarArray(env, K);
-			varHelp[j] = NumVarMatrix(env, K);
-			cons[j] = RangeMatrix(env, K);
-			for (int k = 0; k < K; k++){
-				varOutput[j][k] = IloNumVar(env, 0.0, IloInfinity);
-				varHelp[j][k] = IloNumVarArray(env, L);
-				cons[j][k] = IloRangeArray(env, C);
-				for (int l = 0; l < L; l++){
-					varHelp[j][k][l] = IloNumVar(env, 0.0, IloInfinity);
-				}
-				if (j > current){
-					cons[j][k][0] = IloRange(env, 0.0, 0.0);//will be used to express equality of varOutput, constraint (0)
-					cons[j][k][1] = IloRange(env, 0.0, IloInfinity);// constraint (1)
-					cons[j][k][2] = IloRange(env, -IloInfinity, T[j] - Tdc - Tblow[j] - Tslack);// constraint (2)
-					cons[j][k][3] = IloRange(env, Tfd[k], Tfd[k]);// constraint (3)
-					cons[j][k][4] = IloRange(env, 0.0, IloInfinity);// constraint (4)
-					cons[j][k][5] = IloRange(env, Tdf[k], IloInfinity);// constraint (5)
-					cons[j][k][6] = IloRange(env, T[j - a[k]] + Tcd, T[j - a[k]] + Tcd);// constraint (6)
-					cons[j][k][7] = IloRange(env, TlossD[k], IloInfinity);// constraint (7)
-					cons[j][k][8] = IloRange(env, TlossF[k], IloInfinity);// constraint (8)
-				}
-			}
-		}
 
-		populatebynonzero(model, varOutput, varHelp, cons);
+		//output variables
+		NumVar4Matrix output(env, J);
+		
+
+		populatebynonzero(model, varOutput, varHelp, cons, output);
 
 		IloCplex cplex(model);
 
@@ -100,26 +85,26 @@ main(int argc)
 		for (int j = current; j < current + J; ++j)
 		{
 			cplex.getValues(vals, varOutput[j]);
-			env.out() << "Seconds for load "<<j<<"       = " << vals << endl;
+			env.out() << "Seconds for load " << j << "       = " << vals << endl;
 			/*for (int k = 0; k < K; k++){
-				TimeAvailable[j][k] = cplex.getValue(varOutput[j][k]);
+			TimeAvailable[j][k] = cplex.getValue(varOutput[j][k]);
 			}*/
 		}
 		for (int j = current; j < current + J; j++){
 			for (int k = 0; k < K; k++){
 				cplex.getValues(vals, varHelp[j][k]);
-				env.out() << "Time instances for spoon "<<k<<" in load "<<j<<" = " << vals << endl;
+				env.out() << "Time instances for spoon " << k << " in load " << j << " = " << vals << endl;
 				/*for (int l = 0; l < L; l++){
-					TimeInstances[j][k][l] = cplex.getValue(varHelp[j][k][l]);
+				TimeInstances[j][k][l] = cplex.getValue(varHelp[j][k][l]);
 				}*/
 			}
 		}
 
-		for (int j = current + 2; j < J + current; j++){
+		/*for (int j = current + 2; j < J + current; j++){
 			LK103[j][0] = TimeInstances[j - 2][0][0];
 			LK103[j][1] = TimeInstances[j][0][5];
-			env.out() << "LK103, load " << j << " : " << LK103[j][1]-LK103[j][0] << endl;
-		}
+			env.out() << "LK103, load " << j << " : " << LK103[j][1] - LK103[j][0] << endl;
+		}*/
 		/*cplex.getSlacks(vals, cons);
 		env.out() << "Slacks        = " << vals << endl;
 		cplex.getDuals(vals, cons);
@@ -143,20 +128,50 @@ main(int argc)
 
 
 static void
-populatebynonzero(IloModel model, NumVarMatrix varOutput, NumVar3Matrix varHelp, Range3Matrix con)
+populatebynonzero(IloModel model, NumVarMatrix varOutput, NumVar3Matrix varHelp, Range3Matrix con, NumVar4Matrix output)
 {
 	IloEnv env = model.getEnv();
 
 	IloObjective obj = IloMaximize(env); //maximization function
 
+	//initialise variables:
+	//real decision variables
+	for (int j = 0; j <J + current; j++){
+		varOutput[j] = IloNumVarArray(env, K);
+		varHelp[j] = NumVarMatrix(env, K);
+		con[j] = RangeMatrix(env, K);
+		for (int k = 0; k < K; k++){
+			varOutput[j][k] = IloNumVar(env, 0.0, IloInfinity);
+			varHelp[j][k] = IloNumVarArray(env, L);
+			con[j][k] = IloRangeArray(env, C);
+			for (int l = 0; l < L; l++){
+				varHelp[j][k][l] = IloNumVar(env, 0.0, IloInfinity);
+			}
+		}
+	}
 
+	//output variables
+	for (int j = 0; j < J; j++){
+		output[j] = NumVar3Matrix(env, K);
+		for (int k = 0; k < K; k++){
+			output[j][k] = NumVarMatrix(env, o);
+			for (int n = 0; n < o; n++){
+				output[j][k][n] = IloNumVarArray(env, 3);
+				for (int a = 0; a < 3; a++){
+					output[j][k][n][a] = IloNumVar(env, 0.0, IloInfinity);
+				}
+			}
+		}
+	}
+
+	//define constraints
 	for (int j = current; j < current + J; ++j)
 	{
 		for (int k = 0; k < K; ++k)
 		{
-			
+
 			obj.setLinearCoef(varOutput[j][k], 1.0);//add all variables to objective function, factor 1 
-			
+
 			//constraint 0: express value of output objective variables
 			model.add(varOutput[j][k] + varHelp[j][k][2] - varHelp[j][k][3] == 0);
 
@@ -194,6 +209,43 @@ populatebynonzero(IloModel model, NumVarMatrix varOutput, NumVar3Matrix varHelp,
 	}
 
 	model.add(obj);
-	
+
+	//define output variables
+	for (int j = current; j < J + current; j++){
+		for (int k = 0; k < K; k++){
+			//all output variables need to be defined as equality constraint
+			//0: duration, 1 before, 2: after
+
+			//output LK103: moet eigenlijk j+2 zijn bij (1), oplosbaar?
+			model.add(output[j][k][0][0] == varHelp[j][0][0]-varHelp[j-2][0][5]);
+			model.add(output[j][k][0][2] == varHelp[j][0][0] );
+			model.add(output[j][k][0][1] == varHelp[j - 2][0][5]);
+
+			//output LK106
+			model.add(output[j][k][1][0] == varHelp[j][0][3] - varHelp[j][0][2]);
+			model.add(output[j][k][1][1] == varHelp[j][0][2]);
+			model.add(output[j][k][1][2] == varHelp[j][0][3]);
+
+			//output Terberg 1
+			for (int d = 0; d < J / 2; d++){
+				model.add(output[2 * d][k][2][0] == varHelp[2 * d][1][4] - varHelp[2*d][1][1]);
+				model.add(output[2 * d][k][2][1] == varHelp[2 * d][1][1]);
+				model.add(output[2 * d][k][2][2] == varHelp[2 * d][1][4]);
+			}
+
+			//output Terberg 2
+			for (int d = 0; d < J / 2 - 0.6; d++){
+				model.add(output[2 * d + 1][k][3][0] == varHelp[2 * d + 1][1][4] - varHelp[2 * d][1][1]);
+				model.add(output[2 * d + 1][k][3][1] == varHelp[2 * d + 1][1][1]);
+				model.add(output[2 * d + 1][k][3][2] == varHelp[2 * d + 1][1][4]);
+			}
+
+			//output mobile crane
+			model.add(output[j][k][4][0] == varHelp[j][0][3] - varHelp[j][0][2]+ TlossF[1]);
+			model.add(output[j][k][4][1] == varHelp[j][0][2]);
+			model.add(output[j][k][4][2] == varHelp[j][0][3] + TlossF[1]);
+		}
+	}
+
 
 }
