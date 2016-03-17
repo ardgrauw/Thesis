@@ -13,6 +13,7 @@ typedef IloArray<IloRangeArray> RangeMatrix;
 typedef IloArray<RangeMatrix> Range3Matrix;
 typedef IloArray<IloConstraintArray> ConstraintMatrix;
 typedef IloArray<ConstraintMatrix> Constraint3Matrix;
+//test
 
 
 static void populatebynonzero(IloModel model, NumVarMatrix varOutput, NumVar3Matrix varHelp, Range3Matrix con);
@@ -20,6 +21,7 @@ static void populatebynonzero(IloModel model, NumVarMatrix varOutput, NumVar3Mat
 const int J = 10; // how many loads should be considered
 const int K = 2; // number of spoons in 1 load, should always stay 2
 const int L = 6; // number of time variables to be considered
+const int C = 20; // number of constraints
 static double Tslack = 180; //slack time or margin time for all spoons
 static int a[2] = { 2, 3 }; //differentiating between filling places for a certain constraint
 static int b[2] = { 1, 2 }; //differentiating between filling places for a certain constraint
@@ -30,6 +32,7 @@ static double Tdf[2] = { 60, 300 }; // driving time from drop-off to the filling
 static double Tfd[2] = { 60, 420 }; // driving time from the filling area to drop-off (hall, dockside)
 static double TlossD[2] = { 120, 180 }; // time lost between placing spoon at dropoff and picking up the next one
 static double TlossF[2] = { 0, 60 }; // time lost between finishing one spoon and starting the next at the dockside
+static double TloadMin[2] = { 780, 900 }; //minimal number of seconds that is required to load a spoon 
 
 //test parameters
 int current = 4;
@@ -55,7 +58,7 @@ main(int argc)
 			for (int k = 0; k < K; k++){
 				varOutput[j][k] = IloNumVar(env, 0.0, IloInfinity);
 				varHelp[j][k] = IloNumVarArray(env, L);
-				cons[j][k] = IloRangeArray(env, 10);
+				cons[j][k] = IloRangeArray(env, C);
 				for (int l = 0; l < L; l++){
 					varHelp[j][k][l] = IloNumVar(env, 0.0, IloInfinity);
 				}
@@ -84,12 +87,38 @@ main(int argc)
 		}
 
 		IloNumArray vals(env);
+		IloNumVar val(env);
+
+		//vars to save output
+		double TimeAvailable[J][K];
+		double TimeInstances[J][K][L];
+		double LK103[J][2];
+
+
 		env.out() << "Solution status = " << cplex.getStatus() << endl;
 		env.out() << "Solution value  = " << cplex.getObjValue() << endl;
 		for (int j = current; j < current + J; ++j)
 		{
 			cplex.getValues(vals, varOutput[j]);
-			env.out() << "Values        = " << vals << endl;
+			env.out() << "Seconds for load "<<j<<"       = " << vals << endl;
+			/*for (int k = 0; k < K; k++){
+				TimeAvailable[j][k] = cplex.getValue(varOutput[j][k]);
+			}*/
+		}
+		for (int j = current; j < current + J; j++){
+			for (int k = 0; k < K; k++){
+				cplex.getValues(vals, varHelp[j][k]);
+				env.out() << "Time instances for spoon "<<k<<" in load "<<j<<" = " << vals << endl;
+				/*for (int l = 0; l < L; l++){
+					TimeInstances[j][k][l] = cplex.getValue(varHelp[j][k][l]);
+				}*/
+			}
+		}
+
+		for (int j = current + 2; j < J + current; j++){
+			LK103[j][0] = TimeInstances[j - 2][0][0];
+			LK103[j][1] = TimeInstances[j][0][5];
+			env.out() << "LK103, load " << j << " : " << LK103[j][1]-LK103[j][0] << endl;
 		}
 		/*cplex.getSlacks(vals, cons);
 		env.out() << "Slacks        = " << vals << endl;
@@ -125,20 +154,9 @@ populatebynonzero(IloModel model, NumVarMatrix varOutput, NumVar3Matrix varHelp,
 	{
 		for (int k = 0; k < K; ++k)
 		{
-			/*con[j][k].add(IloRange(env, 0.0, 0.0));//will be used to express equality of varOutput, constraint (0)
-			con[j][k].add(IloRange(env, 0.0, IloInfinity));// constraint (1)
-			con[j][k].add(IloRange(env, -IloInfinity, T[j] - Tdc - Tblow[j] - Tslack));// constraint (2)
-			con[j][k].add(IloRange(env, Tfd[k], Tfd[k]));// constraint (3)
-			con[j][k].add(IloRange(env, 0.0, IloInfinity));// constraint (4)
-			con[j][k].add(IloRange(env, Tdf[k], IloInfinity));// constraint (5)
-			con[j][k].add(IloRange(env, T[j - a[k]] + Tcd, T[j - a[k]] + Tcd));// constraint (6)
-			con[j][k].add(IloRange(env, TlossD[k], IloInfinity));// constraint (7)
-			con[j][k].add(IloRange(env, TlossF[k], IloInfinity));// constraint (8)*/
-
-			//varOutput[j].add(IloNumVar(env, 0.0, IloInfinity));//create decision variabes for available time
+			
 			obj.setLinearCoef(varOutput[j][k], 1.0);//add all variables to objective function, factor 1 
-			//model.add(IloMaximize(env, IloSum(varOutput[j])));
-
+			
 			//constraint 0: express value of output objective variables
 			model.add(varOutput[j][k] + varHelp[j][k][2] - varHelp[j][k][3] == 0);
 
@@ -166,8 +184,13 @@ populatebynonzero(IloModel model, NumVarMatrix varOutput, NumVar3Matrix varHelp,
 			//constraint 8: Tfb >= Tfa(j-1)+Tloss, 2
 			model.add(TlossF[k] <= varHelp[j][k][2] - varHelp[j - 1][k][3]);
 
+			//constraint 9: at least X s for every load
+			model.add(varOutput[j][k] >= TloadMin[k]);
+
 		}
-		//obj.setLinearCoefs(varOutput[j]);//add all variables to objective function, factor 1
+		//constraint 10: both spoons are picked up at same time at dropoff: Td2a,1 == Td2a,2
+		model.add(varHelp[j][1][5] == varHelp[j][0][5]);
+
 	}
 
 	model.add(obj);
