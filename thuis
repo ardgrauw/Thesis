@@ -1,7 +1,12 @@
 // Timing.cpp : Defines the entry point for the console application.
 //
 
-#include "stdafx.h"
+
+// basic file operations
+#include <iostream>
+#include <fstream>
+using namespace std;
+
 
 #include <ilcplex/ilocplex.h>
 ILOSTLBEGIN
@@ -58,7 +63,7 @@ main(int argc)
 		Range3Matrix cons(env, J + current);
 
 		//output variables
-		NumVar4Matrix output(env, J);
+		NumVar4Matrix output(env, J + current);
 
 
 		populatebynonzero(model, varOutput, varHelp, cons, output);
@@ -113,6 +118,31 @@ main(int argc)
 		env.out() << "Reduced Costs = " << vals << endl;*/
 
 		cplex.exportModel("lpex1.lp");
+
+		//write variables to txt file
+		ofstream myfile;
+		myfile.open("SolutionProgram.txt");
+		myfile << "Output of program:\n \n";
+		myfile << "Objective value: total time available for loeading spoons: " << cplex.getObjValue() << "\n\n";
+		myfile << "Available seconds for loading each (j,k): \n";
+		for (int j = current; j < J + current; j++){
+			cplex.getValues(vals, varOutput[j]);
+			myfile << "Load " << j << ": " << vals << "\n";
+			for (int k = 0; k < K; k++){
+				cplex.getValues(vals, varHelp[j][k]);
+				myfile << "Time instances for spoon " << k << " in load " << j << " = " << vals << "\n";
+			}
+		}
+		myfile << "\nDifferent machines: used time, begin and end:\n";
+		for (int i = 0; i < o; i++){
+			for (int j = current; j < J + current; j++){
+				if (((i == 2 && j % 2 == 1)||(i == 3 && j % 2 == 0))==false){
+					cplex.getValues(vals, output[j][0][i]);
+					myfile << "Machine " << i << ", load " << j << ": " << vals << "\n";
+				}
+			}
+		}
+		myfile.close();
 	}
 	catch (IloException& e) {
 		cerr << "Concert exception caught: " << e << endl;
@@ -150,19 +180,7 @@ populatebynonzero(IloModel model, NumVarMatrix varOutput, NumVar3Matrix varHelp,
 		}
 	}
 
-	//output variables
-	for (int j = 0; j < J; j++){
-		output[j] = NumVar3Matrix(env, K);
-		for (int k = 0; k < K; k++){
-			output[j][k] = NumVarMatrix(env, o);
-			for (int n = 0; n < o; n++){
-				output[j][k][n] = IloNumVarArray(env, 3);
-				for (int a = 0; a < 3; a++){
-					output[j][k][n][a] = IloNumVar(env, 0.0, IloInfinity);
-				}
-			}
-		}
-	}
+	
 
 	//define constraints
 	for (int j = current; j < current + J; ++j)
@@ -212,8 +230,21 @@ populatebynonzero(IloModel model, NumVarMatrix varOutput, NumVar3Matrix varHelp,
 
 	//define output variables
 	for (int j = current; j < J + current; j++){
+		output[j] = NumVar3Matrix(env, K);
 		for (int k = 0; k < K; k++){
-			//all output variables need to be defined as equality constraint
+			output[j][k] = NumVarMatrix(env, o);
+			for (int n = 0; n < o; n++){
+				output[j][k][n] = IloNumVarArray(env, 3);
+				for (int a = 0; a < 3; a++){
+					output[j][k][n][a] = IloNumVar(env, 0.0, IloInfinity);
+				}
+			}
+		}
+	}
+
+	for (int j = current; j < J + current; j++){
+		for (int k = 0; k < K; k++){
+			//all output variables "need" to be defined as equality constraint
 			//0: duration, 1 before, 2: after
 
 			//output LK103: moet eigenlijk j+2 zijn bij (1), oplosbaar?
@@ -226,20 +257,6 @@ populatebynonzero(IloModel model, NumVarMatrix varOutput, NumVar3Matrix varHelp,
 			model.add(output[j][k][1][1] == varHelp[j][0][2]);
 			model.add(output[j][k][1][2] == varHelp[j][0][3]);
 
-			//output Terberg 1
-			for (int d = 0; d < J / 2; d++){
-				model.add(output[2 * d][k][2][0] == varHelp[2 * d][1][4] - varHelp[2 * d][1][1]);
-				model.add(output[2 * d][k][2][1] == varHelp[2 * d][1][1]);
-				model.add(output[2 * d][k][2][2] == varHelp[2 * d][1][4]);
-			}
-
-			//output Terberg 2
-			for (int d = 0; d < J / 2 - 0.6; d++){
-				model.add(output[2 * d + 1][k][3][0] == varHelp[2 * d + 1][1][4] - varHelp[2 * d][1][1]);
-				model.add(output[2 * d + 1][k][3][1] == varHelp[2 * d + 1][1][1]);
-				model.add(output[2 * d + 1][k][3][2] == varHelp[2 * d + 1][1][4]);
-			}
-
 			//output mobile crane
 			model.add(output[j][k][4][0] == varHelp[j][0][3] - varHelp[j][0][2] + TlossF[1]);
 			model.add(output[j][k][4][1] == varHelp[j][0][2]);
@@ -247,5 +264,18 @@ populatebynonzero(IloModel model, NumVarMatrix varOutput, NumVar3Matrix varHelp,
 		}
 	}
 
+	//output Terberg 1
+	for (int d = 0; d < J / 2; d++){
+		model.add(output[current + 2 * d][0][2][0] == varHelp[current + 2 * d][1][4] - varHelp[current + 2 * d][1][1]);
+		model.add(output[current + 2 * d][0][2][1] == varHelp[current + 2 * d][1][1]);
+		model.add(output[current + 2 * d][0][2][2] == varHelp[current + 2 * d][1][4]);
+	}
+
+	//output Terberg 2
+	for (int d = 0; d <  J / 2 - 0.6; d++){
+		model.add(output[current + 2 * d + 1][0][3][0] == varHelp[current + 2 * d + 1][1][4] - varHelp[current + 2 * d + 1][1][1]);
+		model.add(output[current + 2 * d + 1][0][3][1] == varHelp[current + 2 * d + 1][1][1]);
+		model.add(output[current + 2 * d + 1][0][3][2] == varHelp[current + 2 * d + 1][1][4]);
+	}
 
 }
