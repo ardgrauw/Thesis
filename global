@@ -1,12 +1,12 @@
 // Timing.cpp : Defines the entry point for the console application.
 //
 
-
 // basic file operations
 #include <iostream>
 #include <fstream>
 using namespace std;
 
+#include "stdafx.h"
 
 #include <ilcplex/ilocplex.h>
 ILOSTLBEGIN
@@ -51,18 +51,18 @@ static int Tblow[M] = { 60, 60, 60, 60, 60, 60, 60, 60, 60, 60, 60, 60, 60, 60, 
 int pastTimes[M][K][L] = { 0 };
 
 //parmeters considering the types of scrap
-static double LoadingSpeed[K][I] = { {2.59, 2.22, 1.49, 2.13, 2.85, 1.22, 2.62, 2.86, 2.22, 2.81}, {0.61, 2.58, 1.07, 2.67, 1.04, 2.09, 2.54, 1.85, 1.96, 2.34} }; // loading speed in tonnes/min
-static double minScrap = 1; // at least 1 tonne should be chosen
+static double LoadingSpeed[K][I] = { { 2.59, 2.22, 1.49, 2.13, 2.85, 1.22, 2.62, 2.86, 2.22, 2.81 }, { 0.61, 2.58, 1.07, 2.67, 1.04, 2.09, 2.54, 1.85, 1.96, 2.34 } }; // loading speed in tonnes/min
+static double minScrap = 1; // at least 1 tonne should be chosen (if the type is chosen)
 static double maxScrap = 50; // max scrap to be chosen, for big M constraint
-static double sulfur[I] = {100, 100, 150, 150, 200, 300, 300,350, 350, 500}; //concentration of sulfur per scrap type i (ppm)
+static double sulfur[I] = { 100, 100, 150, 150, 200, 300, 300, 350, 350, 500 }; //concentration of sulfur per scrap type i (ppm)
 static double residuals[I] = { 850, 850, 900, 1100, 1150, 1150, 1600, 2000, 3500, 5000 }; //concentration of residuals per scrap type i (ppm)
-static double price[I] = {10, 9, 8, 8, 7, 6.5, 6, 5, 4.5, 4}; // price for one tonne of steel of scrap type i
-static int maxTypes = 5;//maximum number of types of scrap that can be chosen
-static double sulfurMax[J] = { 15000, 13000, 20000, 15000, 18000, 25000, 15000, 20000, 12000, 17000 };
-static double residualsMax[J] = { 150000, 130000, 200000, 150000, 180000, 250000, 150000, 200000, 120000, 170000 };
-static double totalWeight[J] = { 80, 80, 80, 80, 80, 80, 80, 80, 80, 80 };
-static double currentStock[K][I] = { { 1000, 1000, 1000, 1000, 1000, 1000, 1000, 1000, 1000, 1000 }, { 1000, 1000, 1000, 1000, 1000, 1000, 1000, 1000, 1000, 1000 } };
-static double maxStock = 100000;
+static double price[I] = { 10, 9, 8, 8, 7, 6.5, 6, 5, 4.5, 4 }; // price for one tonne of steel of scrap type i
+static int maxTypes = 10;//maximum number of types of scrap that can be chosen
+static double sulfurMax[M] = { 15000, 13000, 20000, 15000, 18000, 25000, 15000, 20000, 12000, 17000, 25000, 15000, 20000, 12000, 17000 };
+static double residualsMax[M] = { 150000, 130000, 200000, 150000, 180000, 250000, 150000, 200000, 120000, 170000, 200000, 150000, 180000, 250000, 150000 };
+static double totalWeight[M] = { 80, 80, 80, 80, 80, 80, 80, 80, 80, 80 , 80, 80, 80, 80, 80};
+static double currentStock[K][I] = { { 200, 50, 100, 30, 150, 25, 40, 75, 40, 100 }, { 150, 25, 40, 75, 40, 100, 50, 100, 30, 150 } };
+static double maxStock = 1000;
 
 
 //output parameters
@@ -183,12 +183,12 @@ main(int argc)
 		//define constraints concerning spoon loading
 
 		for (int j = current; j < J + current; j++){
-			IloExpr sumSulfur = 0;
-			IloExpr sumResiduals = 0;
-			IloExpr sumWeight = 0;
+			IloExpr sumSulfur(env);
+			IloExpr sumResiduals(env);
+			IloExpr sumWeight(env);
 			for (int k = 0; k < K; k++){
-				IloExpr sumLoadingTime = 0;
-				IloExpr sumTypes = 0;
+				IloExpr sumLoadingTime(env);
+				IloExpr sumTypes(env);
 				for (int i = 0; i < I; i++){
 
 					// objective function: minimize cost of scrap
@@ -210,7 +210,7 @@ main(int argc)
 						model.add(varAvailable[j][k][i] == varAvailable[j - 1][k][i] - varWeights[j - 1][k][i]);//if stock filling: + x[j][k][i]
 					}
 					//calculate total loading time
-					sumLoadingTime = sumLoadingTime +LoadingSpeed[k][i] * varWeights[j][k][i];
+					sumLoadingTime = sumLoadingTime + varWeights[j][k][i] / LoadingSpeed[k][i];
 					//calculate total number of types used
 					sumTypes = sumTypes + varSelection[j][k][i];
 					//calculate total sulfur in loads
@@ -221,7 +221,7 @@ main(int argc)
 					sumWeight = sumWeight + varWeights[j][k][i];
 				}
 				//loading time constraint
-				model.add(sumLoadingTime * 60 <= varOutput[j][k]);
+				model.add(sumLoadingTime *60 <= varOutput[j][k]);
 				//constraint for max number of types
 				model.add(sumTypes <= maxTypes);
 			}
@@ -229,6 +229,7 @@ main(int argc)
 			model.add(sumSulfur <= sulfurMax[j]);
 			//constraint on residuals
 			model.add(sumResiduals <= residualsMax[j]);
+			sumResiduals.end();
 			//constraint on total scrap weight
 			model.add(sumWeight == totalWeight[j]);
 		}
@@ -309,11 +310,8 @@ main(int argc)
 
 		IloNumArray vals(env);
 		IloNumVar val(env);
+		IloNum totalLoadingTime = 0;
 
-		//vars to save output
-		double TimeAvailable[J][K];
-		double TimeInstances[J][K][L];
-		double LK103[J][2];
 
 
 		env.out() << "Solution status = " << cplex.getStatus() << endl;
@@ -321,11 +319,13 @@ main(int argc)
 		for (int j = current; j < current + J; ++j)
 		{
 			cplex.getValues(vals, varOutput[j]);
+			totalLoadingTime += vals[0] + vals[1];
 			env.out() << "Seconds for load " << j << "       = " << vals << endl;
 			/*for (int k = 0; k < K; k++){
 			TimeAvailable[j][k] = cplex.getValue(varOutput[j][k]);
 			}*/
 		}
+		env.out() << "\nTotal loading time = " << totalLoadingTime << "\n";
 		for (int j = current; j < current + J; j++){
 			for (int k = 0; k < K; k++){
 				cplex.getValues(vals, varHelp[j][k]);
@@ -350,11 +350,12 @@ main(int argc)
 
 		cplex.exportModel("lpex3.lp");
 
-		//write variables to txt file
+		//write variables to txt file, comprehensive version
 		ofstream myfile;
 		myfile.open("SolutionProgramComplete.txt");
 		myfile << "Output of program:\n \n";
-		myfile << "Objective value: total time available for loeading spoons: " << cplex.getObjValue() << "\n\n";
+		myfile << "Objective value: total cost for all spoons (scrap value): " << cplex.getObjValue() << "\n\n";
+		myfile << "\nTotal loading time = " << totalLoadingTime << "\n";
 		myfile << "Available seconds for loading each (j,k): \n";
 		for (int j = current; j < J + current; j++){
 			cplex.getValues(vals, varOutput[j]);
@@ -373,14 +374,54 @@ main(int argc)
 				}
 			}
 		}
-		myfile << "\nWeight of different spoons";
+		myfile << "\nWeight of different spoons:\n";
 		for (int j = current; j < J + current; j++){
 			for (int k = 0; k < K; k++){
 				cplex.getValues(vals, varWeights[j][k]);
-				myfile << "load " << j << ", spoon " << k << ": weights of scrap types: " << vals << "\n";
+				IloNum total = 0;
+				for (int i = 0; i < I; i++){
+					total += vals[i];
+				}
+				myfile << "load " << j << ", spoon " << k << ": total= "<< total <<", values: " << vals << "\n";
 			}
 		}
 		myfile.close();
+
+		//just write away raw data to analyse further
+		myfile.open("SolutionRawData.txt");
+		//available seconds
+		for (int j = current; j < J + current; j++){
+			cplex.getValues(vals, varOutput[j]);
+			myfile << vals << "\n";
+		}
+		myfile << "\n";
+		//available seconds
+		for (int j = current; j < J + current; j++){
+			for (int k = 0; k < K; k++){
+				cplex.getValues(vals, varHelp[j][k]);
+				myfile << vals << "\n";
+			}
+		}
+		myfile << "\n";
+		//machines: used time, begin and end
+		for (int i = 0; i < o; i++){
+			for (int j = current; j < J + current; j++){
+				if (((i == 2 && j % 2 == 1) || (i == 3 && j % 2 == 0)) == false){
+					cplex.getValues(vals, output[j][0][i]);
+					myfile << vals << "\n";
+				}
+			}
+		}
+		myfile << "\n";
+		//weights for every spoon, devided by type
+		for (int j = current; j < J + current; j++){
+			for (int k = 0; k < K; k++){
+				cplex.getValues(vals, varWeights[j][k]);
+				myfile << vals << "\n";
+			}
+		}
+		myfile.close();
+
 	}
 	catch (IloException& e) {
 		cerr << "Concert exception caught: " << e << endl;
@@ -393,6 +434,3 @@ main(int argc)
 	cin.get();
 	return 0;
 }  // END main
-
-
-
