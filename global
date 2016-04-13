@@ -1,12 +1,12 @@
 // Timing.cpp : Defines the entry point for the console application.
 //
 
-
 // basic file operations
 #include <iostream>
 #include <fstream>
 using namespace std;
 
+#include "stdafx.h"
 
 #include <ilcplex/ilocplex.h>
 ILOSTLBEGIN
@@ -51,12 +51,12 @@ static int Tblow[M] = { 60, 60, 60, 60, 60, 60, 60, 60, 60, 60, 60, 60, 60, 60, 
 int pastTimes[M][K][L] = { 0 };
 
 //parmeters considering the types of scrap
-static double LoadingSpeed[K][I] = { {2.59, 2.22, 1.49, 2.13, 2.85, 1.22, 2.62, 2.86, 2.22, 2.81}, {0.61, 2.58, 1.07, 2.67, 1.04, 2.09, 2.54, 1.85, 1.96, 2.34} }; // loading speed in tonnes/min
+static double LoadingSpeed[K][I] = { { 2.59, 2.22, 1.49, 2.13, 2.85, 1.22, 2.62, 2.86, 2.22, 2.81 }, { 0.61, 2.58, 1.07, 2.67, 1.04, 2.09, 2.54, 1.85, 1.96, 2.34 } }; // loading speed in tonnes/min
 static double minScrap = 1; // at least 1 tonne should be chosen
 static double maxScrap = 50; // max scrap to be chosen, for big M constraint
-static double sulfur[I] = {100, 100, 150, 150, 200, 300, 300,350, 350, 500}; //concentration of sulfur per scrap type i (ppm)
+static double sulfur[I] = { 100, 100, 150, 150, 200, 300, 300, 350, 350, 500 }; //concentration of sulfur per scrap type i (ppm)
 static double residuals[I] = { 850, 850, 900, 1100, 1150, 1150, 1600, 2000, 3500, 5000 }; //concentration of residuals per scrap type i (ppm)
-static double price[I] = {10, 9, 8, 8, 7, 6.5, 6, 5, 4.5, 4}; // price for one tonne of steel of scrap type i
+static double price[I] = { 10, 9, 8, 8, 7, 6.5, 6, 5, 4.5, 4 }; // price for one tonne of steel of scrap type i
 static int maxTypes = 5;//maximum number of types of scrap that can be chosen
 static double sulfurMax[J] = { 15000, 13000, 20000, 15000, 18000, 25000, 15000, 20000, 12000, 17000 };
 static double residualsMax[J] = { 150000, 130000, 200000, 150000, 180000, 250000, 150000, 200000, 120000, 170000 };
@@ -100,6 +100,11 @@ main(int argc)
 		NumVar3Matrix varWeights(env, J + current);
 		NumVar3Matrix varSelection(env, J + current);
 		NumVar3Matrix varAvailable(env, J + current);
+		IloNumVarArray sumLoadingTime(env,I);
+		IloNumVarArray sumTypes(env,I);
+		NumVarMatrix sumSulfur(env, I);
+		NumVarMatrix sumResiduals(env,I);
+		NumVarMatrix sumWeight(env, I);
 		Range3Matrix cons(env, J + current);
 
 		//output variables
@@ -132,6 +137,11 @@ main(int argc)
 					varAvailable[j][k][i] = IloNumVar(env, 0.0, IloInfinity);
 				}
 			}
+		}
+		for (int i = 0; i < I; i++){
+			sumSulfur[i] = IloNumVarArray(env, K);
+			sumWeight[i] = IloNumVarArray(env, K);
+			sumResiduals[i] = IloNumVarArray(env, K);
 		}
 
 
@@ -183,12 +193,7 @@ main(int argc)
 		//define constraints concerning spoon loading
 
 		for (int j = current; j < J + current; j++){
-			IloExpr sumSulfur = 0;
-			IloExpr sumResiduals = 0;
-			IloExpr sumWeight = 0;
 			for (int k = 0; k < K; k++){
-				IloExpr sumLoadingTime = 0;
-				IloExpr sumTypes = 0;
 				for (int i = 0; i < I; i++){
 
 					// objective function: minimize cost of scrap
@@ -209,8 +214,8 @@ main(int argc)
 						//update stock levels
 						model.add(varAvailable[j][k][i] == varAvailable[j - 1][k][i] - varWeights[j - 1][k][i]);//if stock filling: + x[j][k][i]
 					}
-					//calculate total loading time
-					sumLoadingTime = sumLoadingTime +LoadingSpeed[k][i] * varWeights[j][k][i];
+					/*//calculate total loading time
+					sumLoadingTime = sumLoadingTime + LoadingSpeed[k][i] * varWeights[j][k][i];
 					//calculate total number of types used
 					sumTypes = sumTypes + varSelection[j][k][i];
 					//calculate total sulfur in loads
@@ -218,19 +223,40 @@ main(int argc)
 					//calculate total residuals in loads
 					sumResiduals = sumResiduals + varWeights[j][k][i] * residuals[i];
 					//calculate total weight
-					sumWeight = sumWeight + varWeights[j][k][i];
+					sumWeight = sumWeight + varWeights[j][k][i];*/
+					if (i == 0){
+						model.add(sumLoadingTime[0] == LoadingSpeed[k][i] * varWeights[j][k][i]);
+						model.add(sumTypes[0] == varSelection[j][k][i]);
+						if (k == 0){
+							model.add(sumSulfur[i][k] == varWeights[j][k][i] * sulfur[i]);
+							model.add(sumResiduals[i][k] == varWeights[j][k][i] * residuals[i]);
+							model.add(sumWeight[i][k] == varWeights[j][k][i]);
+						}
+						else{
+							model.add(sumSulfur[i][k] == sumSulfur[I][k-1] + varWeights[j][k][i] * sulfur[i]);
+							model.add(sumResiduals[i][k] == sumResiduals[I][k-1] + varWeights[j][k][i] * residuals[i]);
+							model.add(sumWeight[i][k] == sumWeight[I][k-1] + varWeights[j][k][i]);
+						}
+					}
+					else{
+						model.add(sumLoadingTime[i] == sumLoadingTime[i-1] + LoadingSpeed[k][i] * varWeights[j][k][i]);
+						model.add(sumTypes[i] == sumTypes[i-1] + varSelection[j][k][i]);
+						model.add(sumSulfur[i][k] == sumSulfur[i-1][k] + varWeights[j][k][i] * sulfur[i]);
+						model.add(sumResiduals[i][k] == sumResiduals[i - 1][k] + varWeights[j][k][i] * residuals[i]);
+						model.add(sumWeight[i][k] == sumWeight[i - 1][k] + varWeights[j][k][i]);
+					}
 				}
 				//loading time constraint
-				model.add(sumLoadingTime * 60 <= varOutput[j][k]);
+				model.add(sumLoadingTime[I] * 60 <= varOutput[j][k]);
 				//constraint for max number of types
-				model.add(sumTypes <= maxTypes);
+				model.add(sumTypes[I] <= maxTypes);
 			}
 			//constraint on sulfur
-			model.add(sumSulfur <= sulfurMax[j]);
+			model.add(sumSulfur[I][K] <= sulfurMax[j]);
 			//constraint on residuals
-			model.add(sumResiduals <= residualsMax[j]);
+			model.add(sumResiduals[I][K] <= residualsMax[j]);
 			//constraint on total scrap weight
-			model.add(sumWeight == totalWeight[j]);
+			model.add(sumWeight[I][K] == totalWeight[j]);
 		}
 
 		model.add(obj);
@@ -393,6 +419,3 @@ main(int argc)
 	cin.get();
 	return 0;
 }  // END main
-
-
-
