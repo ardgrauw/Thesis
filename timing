@@ -167,6 +167,34 @@ main(int argc)
 			}
 		}
 		myfile.close();
+
+		//just write away raw data to analyse further
+		myfile.open("SolutionRawData.txt");
+		//available seconds
+		for (int j = current; j < J + current; j++){
+			cplex.getValues(vals, varOutput[j]);
+			myfile << vals << "\n";
+		}
+		myfile << "\n";
+		//available seconds
+		for (int j = current; j < J + current; j++){
+			for (int k = 0; k < K; k++){
+				cplex.getValues(vals, varHelp[j][k]);
+				myfile << vals << "\n";
+			}
+		}
+		myfile << "\n";
+		//machines: used time, begin and end
+		for (int i = 0; i < o; i++){
+			for (int j = current; j < J + current; j++){
+				if (((i == 2 && j % 2 == 1) || (i == 3 && j % 2 == 0)) == false){
+					cplex.getValues(vals, output[j][0][i]);
+					myfile << vals << "\n";
+				}
+			}
+		}
+		myfile.close();
+
 	}
 	catch (IloException& e) {
 		cerr << "Concert exception caught: " << e << endl;
