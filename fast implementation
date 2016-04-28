@@ -87,9 +87,9 @@ main(int argc)
 		for (int k = 0; k < K; k++){
 			for (int i = 0; i < I; i++){
 				if (k == 0)
-					LoadsByProd[j][k][i] = (rand() % 23) / 10;
+					LoadsByProd[j][k][i] = (rand() % 80) / 10;
 				else
-					LoadsByProd[j][k][i] = (rand() % 31) / 10;
+					LoadsByProd[j][k][i] = (rand() % 80) / 10;
 			}
 		}
 	}
@@ -173,7 +173,7 @@ main(int argc)
 				model.add(varOutput[j][k] + varHelp[j][k][2] - varHelp[j][k][3] == 0);
 				double som = 0;
 				for (int i = 0; i < I; i++){
-					som += LoadsByProd[j][k][i] * LoadingSpeed[k][i] * 60 ;
+					som += LoadsByProd[j][k][i] / LoadingSpeed[k][i] * 60 ;
 				}
 				model.add(varOutput[j][k] == som);
 
