@@ -1,0 +1,391 @@
+// Timing.cpp : Defines the entry point for the console application.
+//
+
+// basic file operations
+#include <iostream>
+#include <fstream>
+using namespace std;
+
+#include "stdafx.h"
+
+#include <ilcplex/ilocplex.h>
+ILOSTLBEGIN
+
+//typedef om ook matrices to kunnen gebruiken (gemakkelijker dan enkel arrays te gebruiken)
+typedef IloArray<IloNumVarArray> NumVarMatrix;
+typedef IloArray<NumVarMatrix>   NumVar3Matrix;
+typedef IloArray<NumVar3Matrix> NumVar4Matrix;
+typedef IloArray<IloRangeArray> RangeMatrix;
+typedef IloArray<RangeMatrix> Range3Matrix;
+typedef IloArray<IloConstraintArray> ConstraintMatrix;
+typedef IloArray<ConstraintMatrix> Constraint3Matrix;
+
+//constants
+const int J = 10; // how many loads should be considered
+const int M = 15; // number of loads in memory
+const int K = 2; // number of spoons in 1 load, should always stay 2
+const int L = 6; // number of time variables to be considered
+const int C = 20; // number of constraints
+const int I = 10; // number of types of scrap, needed for calculating the current spoon
+static double Tslack = 180; //slack time or margin time for all spoons
+static int a[2] = { 2, 3 }; //differentiating between filling places for a certain constraint
+static int b[2] = { 1, 2 }; //differentiating between filling places for a certain constraint
+
+static double Tdc = 180; // driving time from drop-off to convertor (could be split up for both convertors)
+static double Tcd = 180; // driving time from convertor to drop-off (could be split up for both convertors)
+static double Tdf[2] = { 60, 300 }; // driving time from drop-off to the filling area (hall, dockside)
+static double Tfd[2] = { 60, 420 }; // driving time from the filling area to drop-off (hall, dockside)
+static double TlossD[2] = { 120, 180 }; // time lost between placing spoon at dropoff and picking up the next one
+static double TlossF[2] = { 0, 60 }; // time lost between finishing one spoon and starting the next at the dockside
+static double TloadMin[2] = { 780, 900 }; //minimal number of seconds that is required to load a spoon 
+
+//test parameters
+int current = 4;
+double now = 5600;
+static int whereToLoad[2] = { 0, 1 }; // where to load each spoon: 0:hall, 1:docks, 2: not using this spoon right now
+// more things to adjust to make it possible to have other combinations then (0,1):
+// the different time constraints itself, not only the parameters (keep only 2 Terbergs for instance, hard, or add the LK 107)
+// ad the possibility to only use 1 spoon
+static int T[M] = { 0, 1440, 2760, 5400, 6720, 8040, 9360, 10680, 12000, 13320, 15240, 16980, 18540, 20400, 21720 };
+static int Tblow[M] = { 60, 60, 60, 60, 60, 60, 60, 60, 60, 60, 60, 60, 60, 60, 60 };
+static double StillToLoad[K][I] = { { 10, 0, 5, 0, 0, 0, 0, 2.5, 1, 0 }, { 0, 0, 2.5, 1, 0, 10, 0, 5, 0, 0 } }; // how much tonnes there need to be loaded still for the current spoon
+static double LoadingSpeed[K][I] = { { 2.59, 2.22, 1.49, 2.13, 2.85, 1.22, 2.62, 2.86, 2.22, 2.81 }, { 0.61, 2.58, 1.07, 2.67, 1.04, 2.09, 2.54, 1.85, 1.96, 2.34 } }; // loading speed in tonnes/min
+static double LoadsByProd[M][K][I] = { 0 };
+
+
+//parameters of past time instances
+int pastTimes[M][K][L] = { 0 };
+
+
+
+//output parameters
+const int o = 5;
+static string out[o] = { "LK103", "LK106", "Terberg1", "Terberg2", "MobileCrane" };
+double machineUtilisation[o] = { 0 }; //KPI's for machines, find bottleneck
+
+//
+
+int
+main(int argc)
+{
+
+	//initialisation of actions that are already done
+	pastTimes[1][0][5] = 1260;
+	pastTimes[1][1][5] = 1260;
+	pastTimes[2][0][5] = 2580;
+	pastTimes[2][1][5] = 2580;
+	pastTimes[3][0][5] = 5220;
+	pastTimes[3][1][5] = 5220;
+	pastTimes[1][0][3] = 1200;
+	pastTimes[1][1][3] = 840;
+	pastTimes[2][0][3] = 2520;
+	pastTimes[2][1][3] = 2160;
+	pastTimes[3][0][3] = 5160;
+	pastTimes[3][1][3] = 4800;
+
+	for (int j = 0; j < M; j++){
+		for (int k = 0; k < K; k++){
+			for (int i = 0; i < I; i++){
+				if (k == 0)
+					LoadsByProd[j][k][i] = (rand() % 23) / 10;
+				else
+					LoadsByProd[j][k][i] = (rand() % 31) / 10;
+			}
+		}
+	}
+
+	//computing if there needs to be an alarm
+
+	double timeNeeded[2] = { 0 };
+	for (int k = 0; k < K; k++){
+		for (int i = 0; i < I; i++){
+			timeNeeded[k] += StillToLoad[k][i] / LoadingSpeed[k][i] * 60;
+		}
+		timeNeeded[k] += Tblow[current] + Tdc + Tfd[k];
+	}
+
+
+	double endTime[K] = { 0 };
+	double alarmTime[K] = { 0 };
+	bool alarm[K] = { 0 };
+	for (int k = 0; k < K; k++){
+		endTime[k] = timeNeeded[k] + now;
+		alarmTime[k] = T[current] - endTime[k];
+		alarm[k] = alarmTime[k] < 0;// alarm goes to 1 if spoon is too late
+	}
+
+
+
+	IloEnv   env;
+	try {
+		IloModel model(env);
+
+		NumVarMatrix varOutput(env, J + current);
+		NumVarMatrix timeLate(env, J + current);
+		NumVar3Matrix varHelp(env, J + current);
+		Range3Matrix cons(env, J + current);
+
+		//output variables
+		NumVar4Matrix output(env, J + current);
+
+
+		IloObjective obj = IloMinimize(env); //maximization function
+
+		//initialise variables:
+		//real decision variables
+		for (int j = 0; j <J + current; j++){
+			varOutput[j] = IloNumVarArray(env, K);
+			timeLate[j] = IloNumVarArray(env, K);
+			varHelp[j] = NumVarMatrix(env, K);
+			cons[j] = RangeMatrix(env, K);
+			output[j] = NumVar3Matrix(env, K);
+			for (int k = 0; k < K; k++){
+				varOutput[j][k] = IloNumVar(env, 0.0, IloInfinity);
+				timeLate[j][k] = IloNumVar(env, 0.0, IloInfinity);
+				varHelp[j][k] = IloNumVarArray(env, L);
+				cons[j][k] = IloRangeArray(env, C);
+				for (int l = 0; l < L; l++){
+					varHelp[j][k][l] = IloNumVar(env, 0.0, IloInfinity);
+				}
+				output[j][k] = NumVarMatrix(env, o);
+				for (int n = 0; n < o; n++){
+					output[j][k][n] = IloNumVarArray(env, 3);
+					for (int a = 0; a < 3; a++){
+						output[j][k][n][a] = IloNumVar(env, 0.0, IloInfinity);
+					}
+				}
+			}
+		}
+
+
+		//define constraints
+		for (int j = current; j < current + J; ++j)
+		{
+			for (int k = 0; k < K; ++k)
+			{
+
+				//obj.setLinearCoef(varOutput[j][k], 1.0);//add all variables to objective function, factor 1 
+				obj.setLinearCoef(timeLate[j][k], 1000.0);
+				for (int l = 0; l < L; l++){
+					obj.setLinearCoef(varHelp[j][k][l], 1.0);
+				}
+				//constraint 0: express value of loading time
+				model.add(varOutput[j][k] + varHelp[j][k][2] - varHelp[j][k][3] == 0);
+				double som = 0;
+				for (int i = 0; i < I; i++){
+					som += LoadsByProd[j][k][i] * LoadingSpeed[k][i] * 60 ;
+				}
+				model.add(varOutput[j][k] == som);
+
+				//constraint 1: Td2a>=+Td2b
+				model.add(varHelp[j][k][5] - varHelp[j][k][4] >= 0);
+
+				//constraint 2: Tj>=Td2a + Tdc + Tblow
+				if (k == 0){
+					model.add(varHelp[j - 2][k][5] <= varHelp[j][k][0] - Tcd - Tdc - Tblow[j] );
+				}
+				else {
+					model.add(varHelp[j - 3][k][5] <= varHelp[j][k][0] - Tcd - Tdc - Tblow[j] );
+				}
+				model.add(varHelp[j][0][0] <= varHelp[j - 1][0][5]);
+
+				//constraint 3: Td2b = Tfa+Tfd
+				model.add(Tfd[whereToLoad[k]] == varHelp[j][k][4] - varHelp[j][k][3]);
+
+				//constraint 4: Td1a >= Td1b
+				model.add(0 <= varHelp[j][k][1] - varHelp[j][k][0]);
+
+				//constraint 5: Tfb >= Td1a+Tdf
+				model.add(Tdf[whereToLoad[k]] <= varHelp[j][k][2] - varHelp[j][k][1]);
+
+				//constraint 6: Td1b = T(j-a)+Tcd
+				model.add(T[j - a[whereToLoad[k]]] + Tcd <= varHelp[j][k][0]);
+
+				//constraint 7: Td1a >= Td2b(j-b) + Tloss, 1
+				model.add(TlossD[whereToLoad[k]] <= varHelp[j][k][1] - varHelp[j - b[whereToLoad[k]]][k][4]);
+
+				//constraint 8: Tfb >= Tfa(j-1)+Tloss, 2
+				model.add(TlossF[whereToLoad[k]] <= varHelp[j][k][2] - varHelp[j - 1][k][3]);
+
+				//calculate time late 
+				double tijdKlaarTenLaatste = T[j] - Tdc - Tblow[j] - Tfd[k];
+				model.add(timeLate[j][k] >= varHelp[j][k][3] - tijdKlaarTenLaatste);
+
+				//constraint 9: at least X s for every load
+				//model.add(varOutput[j][k] >= TloadMin[whereToLoad[k]]);
+
+			}
+			//constraint 10: both spoons are picked up at same time at dropoff: Td2a,1 == Td2a,2
+			model.add(varHelp[j][1][5] == varHelp[j][0][5]);
+
+
+		}
+
+		model.add(obj);
+
+		//define past time instance as constraints
+		for (int j = 0; j < M; j++){
+			for (int k = 0; k < K; k++){
+				for (int l = 0; l < L; l++){
+					if (pastTimes[j][k][l] != 0){
+						model.add(pastTimes[j][k][l] == varHelp[j][k][l]);
+					}
+				}
+			}
+		}
+
+		for (int j = current; j < J + current; j++){
+			for (int k = 0; k < K; k++){
+				//all output variables "need" to be defined as equality constraint
+				//0: duration, 1 before, 2: after
+
+				//output LK103: moet eigenlijk j+2 zijn bij (1), oplosbaar?
+				model.add(output[j][k][0][0] == varHelp[j][0][0] - varHelp[j - 2][0][5]);
+				model.add(output[j][k][0][2] == varHelp[j][0][0]);
+				model.add(output[j][k][0][1] == varHelp[j - 2][0][5]);
+
+				//output LK106
+				model.add(output[j][k][1][0] == varHelp[j][0][3] - varHelp[j][0][2]);
+				model.add(output[j][k][1][1] == varHelp[j][0][2]);
+				model.add(output[j][k][1][2] == varHelp[j][0][3]);
+
+				//output mobile crane
+				model.add(output[j][k][4][0] == varHelp[j][0][3] - varHelp[j][0][2] + TlossF[1]);
+				model.add(output[j][k][4][1] == varHelp[j][0][2]);
+				model.add(output[j][k][4][2] == varHelp[j][0][3] + TlossF[1]);
+			}
+		}
+
+		//output Terberg 1
+		for (int d = 0; d < J / 2; d++){
+			model.add(output[current + 2 * d][0][2][0] == varHelp[current + 2 * d][1][4] - varHelp[current + 2 * d][1][1]);
+			model.add(output[current + 2 * d][0][2][1] == varHelp[current + 2 * d][1][1]);
+			model.add(output[current + 2 * d][0][2][2] == varHelp[current + 2 * d][1][4]);
+		}
+
+		//output Terberg 2
+		for (int d = 0; d < J / 2 - 0.6; d++){
+			model.add(output[current + 2 * d + 1][0][3][0] == varHelp[current + 2 * d + 1][1][4] - varHelp[current + 2 * d + 1][1][1]);
+			model.add(output[current + 2 * d + 1][0][3][1] == varHelp[current + 2 * d + 1][1][1]);
+			model.add(output[current + 2 * d + 1][0][3][2] == varHelp[current + 2 * d + 1][1][4]);
+		}
+
+
+
+		IloCplex cplex(model);
+
+		// Optimize the problem and obtain solution.
+		if (!cplex.solve()) {
+			env.error() << "Failed to optimize LP" << endl;
+			throw(-1);
+		}
+
+		IloNumArray vals(env);
+		IloNumVar val(env);
+
+		env.out() << "Solution status = " << cplex.getStatus() << endl;
+		env.out() << "Solution value  = " << cplex.getObjValue() << endl;
+		for (int j = current; j < current + J; ++j)
+		{
+			cplex.getValues(vals, varOutput[j]);
+			env.out() << "Seconds for load " << j << "       = " << vals << endl;
+			/*for (int k = 0; k < K; k++){
+			TimeAvailable[j][k] = cplex.getValue(varOutput[j][k]);
+			}*/
+		}
+		for (int j = current; j < current + J; j++){
+			for (int k = 0; k < K; k++){
+				cplex.getValues(vals, varHelp[j][k]);
+				env.out() << "Time instances for spoon " << k << " in load " << j << " = " << vals << endl;
+				/*for (int l = 0; l < L; l++){
+				TimeInstances[j][k][l] = cplex.getValue(varHelp[j][k][l]);
+				}*/
+			}
+		}
+
+		cplex.exportModel("lpex1.lp");
+
+		//write variables to txt file
+		ofstream myfile;
+		myfile.open("SolutionProgram.txt");
+		myfile << "Output of program:\n \n";
+		myfile << "Alarm for spoons (boolean): [" << alarm[0] << " , " << alarm[1] << "]\n";
+		myfile << "Spare time for spoons: [" << alarmTime[0] << " , " << alarmTime[1] << "]\n\n";
+		myfile << "Objective value: total time available for loading spoons: " << cplex.getObjValue() << "\n\n";
+		myfile << "Available seconds for loading each (j,k): \n";
+		for (int j = current; j < J + current; j++){
+			cplex.getValues(vals, varOutput[j]);
+			myfile << "Load " << j << ": " << vals << "\n";
+			for (int k = 0; k < K; k++){
+				cplex.getValues(vals, varHelp[j][k]);
+				myfile << "Time instances for spoon " << k << " in load " << j << " = " << vals << "\n";
+			}
+		}
+		myfile << "\nTime late for each load and spoon:\n";
+		for (int j = current; j < J + current; j++){
+			cplex.getValues(vals, timeLate[j]);
+			myfile << "Load " << j << ": " << vals << "\n";
+		}
+		myfile << "\nDifferent machines: used time, begin and end:\n";
+		for (int i = 0; i < o; i++){
+			double sum[o] = { 0 };
+			double begin[o] = { 0 };
+			double end[o] = { 0 };
+			for (int j = current; j < J + current; j++){
+				if (((i == 2 && j % 2 == 1) || (i == 3 && j % 2 == 0)) == false){
+					cplex.getValues(vals, output[j][0][i]);
+					myfile << "Machine " << out[i] << ", load " << j << ": " << vals << "\n";
+					if (begin[i] == 0){
+						begin[i] = vals[1];
+					}
+					end[i] = vals[2];
+					sum[i] += vals[0];
+				}
+			}
+			machineUtilisation[i] = sum[i] / (end[i] - begin[i]) * 100;
+			myfile << "Utilization (%): " << machineUtilisation[i] << "\n\n";
+		}
+
+		myfile.close();
+
+		//just write away raw data to analyse further
+		myfile.open("SolutionRawData.txt");
+		//available seconds
+		for (int j = current; j < J + current; j++){
+			cplex.getValues(vals, varOutput[j]);
+			myfile << vals << "\n";
+		}
+		myfile << "\n";
+		//available seconds
+		for (int j = current; j < J + current; j++){
+			for (int k = 0; k < K; k++){
+				cplex.getValues(vals, varHelp[j][k]);
+				myfile << vals << "\n";
+			}
+		}
+		myfile << "\n";
+		//machines: used time, begin and end
+		for (int i = 0; i < o; i++){
+			for (int j = current; j < J + current; j++){
+				if (((i == 2 && j % 2 == 1) || (i == 3 && j % 2 == 0)) == false){
+					cplex.getValues(vals, output[j][0][i]);
+					myfile << vals << "\n";
+				}
+			}
+		}
+		myfile.close();
+
+	}
+	catch (IloException& e) {
+		cerr << "Concert exception caught: " << e << endl;
+	}
+	catch (...) {
+		cerr << "Unknown exception caught" << endl;
+	}
+
+	env.end();
+	cin.get();
+	return 0;
+}  // END main
+
+
