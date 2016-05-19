@@ -1,12 +1,12 @@
 // Timing.cpp : Defines the entry point for the console application.
 //
 
+
 // basic file operations
 #include <iostream>
 #include <fstream>
 using namespace std;
 
-#include "stdafx.h"
 
 #include <ilcplex/ilocplex.h>
 ILOSTLBEGIN
@@ -48,7 +48,7 @@ static int whereToLoad[2] = { 0, 1 }; // where to load each spoon: 0:hall, 1:doc
 // ad the possibility to only use 1 spoon
 static int T[M] = { 0, 1440, 2760, 5400, 6720, 8040, 9360, 10680, 12000, 13320, 15240, 16980, 18540, 20400, 21720 };
 static int Tblow[M] = { 60, 60, 60, 60, 60, 60, 60, 60, 60, 60, 60, 60, 60, 60, 60 };
-static double StillToLoad[K][I] = { { 10, 0, 5, 0, 0, 0, 0, 2.5, 1, 0 }, { 0, 0, 2.5, 1, 0, 10, 0, 5, 0, 0 } }; // how much tonnes there need to be loaded still for the current spoon
+static double StillToLoad[K][I] = { { 10, 0, 5, 0, 0, 0, 0, 2.5, 1, 0 }, { 0 } /*{ 0, 0, 2.5, 1, 0, 10, 0, 5, 0, 0 }*/ }; // how much tonnes there need to be loaded still for the current spoon
 static double LoadingSpeed[K][I] = { { 2.59, 2.22, 1.49, 2.13, 2.85, 1.22, 2.62, 2.86, 2.22, 2.81 }, { 0.61, 2.58, 1.07, 2.67, 1.04, 2.09, 2.54, 1.85, 1.96, 2.34 } }; // loading speed in tonnes/min
 static double LoadsByProd[M][K][I] = { 0 };
 
@@ -157,63 +157,70 @@ main(int argc)
 			}
 		}
 
-
+		
 		//define constraints
 		for (int j = current; j < current + J; ++j)
 		{
 			for (int k = 0; k < K; ++k)
 			{
-
+				
 				//obj.setLinearCoef(varOutput[j][k], 1.0);//add all variables to objective function, factor 1 
 				obj.setLinearCoef(timeLate[j][k], 1000.0);
 				for (int l = 0; l < L; l++){
 					obj.setLinearCoef(varHelp[j][k][l], 1.0);
 				}
-				//constraint 0: express value of loading time
-				model.add(varOutput[j][k] + varHelp[j][k][2] - varHelp[j][k][3] == 0);
-				double som = 0;
-				for (int i = 0; i < I; i++){
-					som += LoadsByProd[j][k][i] / LoadingSpeed[k][i] * 60 ;
-				}
-				model.add(varOutput[j][k] == som);
 
-				//constraint 1: Td2a>=+Td2b
-				model.add(varHelp[j][k][5] - varHelp[j][k][4] >= 0);
+				//if (whereToLoad[k] != 2){
 
-				//constraint 2: Tj>=Td2a + Tdc + Tblow
-				if (k == 0){
-					model.add(varHelp[j - 2][k][5] <= varHelp[j][k][0] - Tcd - Tdc - Tblow[j] );
-				}
-				else {
-					model.add(varHelp[j - 3][k][5] <= varHelp[j][k][0] - Tcd - Tdc - Tblow[j] );
-				}
-				model.add(varHelp[j][0][0] <= varHelp[j - 1][0][5]);
+					//constraint 0: express value of loading time
+					model.add(varOutput[j][k] + varHelp[j][k][2] - varHelp[j][k][3] == 0);
+					double som = 0;
+					if (whereToLoad[k] != 2){
+						for (int i = 0; i < I; i++){
+							som += LoadsByProd[j][k][i] / LoadingSpeed[whereToLoad[k]][i] * 60;
+						}
+					}
+					model.add(varOutput[j][k] == som);
 
-				//constraint 3: Td2b = Tfa+Tfd
-				model.add(Tfd[whereToLoad[k]] == varHelp[j][k][4] - varHelp[j][k][3]);
+					//constraint 1: Td2a>=+Td2b
+					model.add(varHelp[j][k][5] - varHelp[j][k][4] >= 0);
 
-				//constraint 4: Td1a >= Td1b
-				model.add(0 <= varHelp[j][k][1] - varHelp[j][k][0]);
+					//constraint 2: Tj>=Td2a + Tdc + Tblow
+					if (whereToLoad[k] == 0){
+						model.add(varHelp[j - 2][k][5] <= varHelp[j][k][0] - Tcd - Tdc - Tblow[j]);
+						model.add(varHelp[j][k][0] <= varHelp[j - 1][k][5]);
+					}
+					else {
+						model.add(varHelp[j - 3][k][5] <= varHelp[j][k][0] - Tcd - Tdc - Tblow[j]);
+					}
+					
 
-				//constraint 5: Tfb >= Td1a+Tdf
-				model.add(Tdf[whereToLoad[k]] <= varHelp[j][k][2] - varHelp[j][k][1]);
+					//constraint 3: Td2b = Tfa+Tfd
+					model.add(Tfd[whereToLoad[k]] == varHelp[j][k][4] - varHelp[j][k][3]);
 
-				//constraint 6: Td1b = T(j-a)+Tcd
-				model.add(T[j - a[whereToLoad[k]]] + Tcd <= varHelp[j][k][0]);
+					//constraint 4: Td1a >= Td1b
+					model.add(0 <= varHelp[j][k][1] - varHelp[j][k][0]);
 
-				//constraint 7: Td1a >= Td2b(j-b) + Tloss, 1
-				model.add(TlossD[whereToLoad[k]] <= varHelp[j][k][1] - varHelp[j - b[whereToLoad[k]]][k][4]);
+					//constraint 5: Tfb >= Td1a+Tdf
+					model.add(Tdf[whereToLoad[k]] <= varHelp[j][k][2] - varHelp[j][k][1]);
 
-				//constraint 8: Tfb >= Tfa(j-1)+Tloss, 2
-				model.add(TlossF[whereToLoad[k]] <= varHelp[j][k][2] - varHelp[j - 1][k][3]);
+					//constraint 6: Td1b = T(j-a)+Tcd
+					model.add(T[j - a[whereToLoad[k]]] + Tcd <= varHelp[j][k][0]);
 
-				//calculate time late 
-				double tijdKlaarTenLaatste = T[j] - Tdc - Tblow[j] - Tfd[k];
-				model.add(timeLate[j][k] >= varHelp[j][k][3] - tijdKlaarTenLaatste);
+					//constraint 7: Td1a >= Td2b(j-b) + Tloss, 1
+					model.add(TlossD[whereToLoad[k]] <= varHelp[j][k][1] - varHelp[j - b[whereToLoad[k]]][k][4]);
 
-				//constraint 9: at least X s for every load
-				//model.add(varOutput[j][k] >= TloadMin[whereToLoad[k]]);
+					//constraint 8: Tfb >= Tfa(j-1)+Tloss, 2
+					model.add(TlossF[whereToLoad[k]] <= varHelp[j][k][2] - varHelp[j - 1][k][3]);
 
+					//calculate time late 
+					double tijdKlaarTenLaatste = T[j] - Tdc - Tblow[j] - Tfd[k];
+					model.add(timeLate[j][k] >= varHelp[j][k][3] - tijdKlaarTenLaatste);
+
+					//constraint 9: at least X s for every load
+					//model.add(varOutput[j][k] >= TloadMin[whereToLoad[k]]);
+
+				//}
 			}
 			//constraint 10: both spoons are picked up at same time at dropoff: Td2a,1 == Td2a,2
 			model.add(varHelp[j][1][5] == varHelp[j][0][5]);
@@ -255,21 +262,29 @@ main(int argc)
 				model.add(output[j][k][4][2] == varHelp[j][0][3] + TlossF[1]);
 			}
 		}
+		if (whereToLoad[1] == 1){
+			//output Terberg 1
+			for (int d = 0; d < J / 2; d++){
+				model.add(output[current + 2 * d][0][2][0] == varHelp[current + 2 * d][1][4] - varHelp[current + 2 * d][1][1]);
+				model.add(output[current + 2 * d][0][2][1] == varHelp[current + 2 * d][1][1]);
+				model.add(output[current + 2 * d][0][2][2] == varHelp[current + 2 * d][1][4]);
+			}
 
-		//output Terberg 1
-		for (int d = 0; d < J / 2; d++){
-			model.add(output[current + 2 * d][0][2][0] == varHelp[current + 2 * d][1][4] - varHelp[current + 2 * d][1][1]);
-			model.add(output[current + 2 * d][0][2][1] == varHelp[current + 2 * d][1][1]);
-			model.add(output[current + 2 * d][0][2][2] == varHelp[current + 2 * d][1][4]);
+			//output Terberg 2
+			for (int d = 0; d < J / 2 - 0.6; d++){
+				model.add(output[current + 2 * d + 1][0][3][0] == varHelp[current + 2 * d + 1][1][4] - varHelp[current + 2 * d + 1][1][1]);
+				model.add(output[current + 2 * d + 1][0][3][1] == varHelp[current + 2 * d + 1][1][1]);
+				model.add(output[current + 2 * d + 1][0][3][2] == varHelp[current + 2 * d + 1][1][4]);
+			}
 		}
-
-		//output Terberg 2
-		for (int d = 0; d < J / 2 - 0.6; d++){
-			model.add(output[current + 2 * d + 1][0][3][0] == varHelp[current + 2 * d + 1][1][4] - varHelp[current + 2 * d + 1][1][1]);
-			model.add(output[current + 2 * d + 1][0][3][1] == varHelp[current + 2 * d + 1][1][1]);
-			model.add(output[current + 2 * d + 1][0][3][2] == varHelp[current + 2 * d + 1][1][4]);
+		else if (whereToLoad[1] == 0){
+			for (int j = current; j < J + current; j++){
+				model.add(output[j][0][2][0] == varHelp[j][1][3] - varHelp[j][0][2]);
+				model.add(output[j][0][2][1] == varHelp[j][1][2]);
+				model.add(output[j][0][2][2] == varHelp[j][1][3]);
+			}
+			out[2] = "LK107";
 		}
-
 
 
 		IloCplex cplex(model);
@@ -332,18 +347,33 @@ main(int argc)
 			double begin[o] = { 0 };
 			double end[o] = { 0 };
 			for (int j = current; j < J + current; j++){
-				if (((i == 2 && j % 2 == 1) || (i == 3 && j % 2 == 0)) == false){
-					cplex.getValues(vals, output[j][0][i]);
-					myfile << "Machine " << out[i] << ", load " << j << ": " << vals << "\n";
-					if (begin[i] == 0){
-						begin[i] = vals[1];
+				if (whereToLoad[1] == 1){
+					if (((i == 2 && j % 2 == 1) || (i == 3 && j % 2 == 0)) == false){
+						cplex.getValues(vals, output[j][0][i]);
+						myfile << "Machine " << out[i] << ", load " << j << ": " << vals << "\n";
+						if (begin[i] == 0){
+							begin[i] = vals[1];
+						}
+						end[i] = vals[2];
+						sum[i] += vals[0];
 					}
-					end[i] = vals[2];
-					sum[i] += vals[0];
+				}
+				else if (whereToLoad[1] == 0){
+					if (i != 3){
+						cplex.getValues(vals, output[j][0][i]);
+						myfile << "Machine " << out[i] << ", load " << j << ": " << vals << "\n";
+						if (begin[i] == 0){
+							begin[i] = vals[1];
+						}
+						end[i] = vals[2];
+						sum[i] += vals[0];
+					}
 				}
 			}
-			machineUtilisation[i] = sum[i] / (end[i] - begin[i]) * 100;
-			myfile << "Utilization (%): " << machineUtilisation[i] << "\n\n";
+			if (whereToLoad[1] == 1 || i !=3 ){
+				machineUtilisation[i] = sum[i] / (end[i] - begin[i]) * 100;
+				myfile << "Utilization (%): " << machineUtilisation[i] << "\n\n";
+			}
 		}
 
 		myfile.close();
@@ -387,5 +417,4 @@ main(int argc)
 	cin.get();
 	return 0;
 }  // END main
-
 
