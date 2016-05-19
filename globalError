@@ -65,8 +65,8 @@ static double sulfurMax[M] = { 15000, 13000, 20000, 15000, 18000, 25000, 15000, 
 static double residualsMax[M] = { 150000, 130000, 200000, 150000, 180000, 250000, 150000, 200000, 120000, 170000, 200000, 150000, 180000, 250000, 150000 };
 static double totalWeight[M] = { 80, 80, 80, 80, 80, 80, 80, 80, 80, 80, 80, 80, 80, 80, 80 };
 double currentStock[K][I] = { { 200, 50, 100, 30, 150, 25, 40, 75, 40, 100 }, { 150, 25, 40, 75, 40, 100, 50, 100, 30, 150 } };
-static double maxStock = 1000;
-static double incomingScrap[J][I] = { 0 };
+static double maxStock = 100000;
+static double incomingScrap[M][I] = { 0 };
 
 
 //output parameters
@@ -78,12 +78,7 @@ static string out[o] = { "LK103", "LK106", "Terberg1", "Terberg2", "MobileCrane"
 int
 main(int argc)
 {
-	//test for boundary problem
-	for (int k = 0; k < K; k++){
-		for (int i = 0; i < I; i++){
-			currentStock[k][i] *= 100;
-		}
-	}
+	
 
 	//initialisation of actions that are already done
 	pastTimes[1][0][5] = 1260;
@@ -131,8 +126,8 @@ main(int argc)
 			varAvailable[j] = NumVarMatrix(env, K);
 			varRefill[j] = NumVarMatrix(env, K);
 			for (int k = 0; k < K; k++){
-				varOutput[j][k] = IloNumVar(env, 0.0, IloInfinity);
-				timeLate[j][k] = IloNumVar(env, 0.0, IloInfinity);
+				varOutput[j][k] = IloNumVar(env, 0.0, IloInfinity,"o");
+				timeLate[j][k] = IloNumVar(env, 0.0, IloInfinity, "l");
 				varHelp[j][k] = IloNumVarArray(env, L);
 				cons[j][k] = IloRangeArray(env, C);
 				varWeights[j][k] = IloNumVarArray(env, I);
@@ -140,13 +135,13 @@ main(int argc)
 				varAvailable[j][k] = IloNumVarArray(env, I);
 				varRefill[j][k] = IloNumVarArray(env, I);
 				for (int l = 0; l < L; l++){
-					varHelp[j][k][l] = IloNumVar(env, 0.0, IloInfinity);
+					varHelp[j][k][l] = IloNumVar(env, 0.0, IloInfinity, "h");
 				}
 				for (int i = 0; i < I; i++){
-					varWeights[j][k][i] = IloNumVar(env, 0.0, IloInfinity);
-					varSelection[j][k][i] = IloIntVar(env, 0, 1);
-					varAvailable[j][k][i] = IloNumVar(env, 0.0, IloInfinity);
-					varRefill[j][k][i] = IloNumVar(env, 0.0, IloInfinity);
+					varWeights[j][k][i] = IloNumVar(env, 0.0, IloInfinity, "w");
+					varSelection[j][k][i] = IloIntVar(env, 0, 1, "b");
+					varAvailable[j][k][i] = IloNumVar(env, 0.0, IloInfinity, "a");
+					varRefill[j][k][i] = IloNumVar(env, 0.0, IloInfinity, "r");
 				}
 			}
 		}
@@ -165,16 +160,19 @@ main(int argc)
 					obj.setLinearCoef(varHelp[j][k][l], 0.01);
 				}
 
+				//define varOutput
+				model.add(varOutput[j][k] + varHelp[j][k][2] - varHelp[j][k][3] == 0);
+
 				//constraint 1: Td2a>=+Td2b
 				model.add(varHelp[j][k][5] - varHelp[j][k][4] >= 0);
 
 				//constraint 2: Tj>=Td2a + Tdc + Tblow
 				if (whereToLoad[k] == 0){
-					model.add(varHelp[j - 2][k][5] <= varHelp[j][k][0] - Tcd - Tdc - Tblow[j]);
+					model.add(varHelp[j - 2][k][5] <= varHelp[j][k][0] - Tcd - Tdc );
 					model.add(varHelp[j][k][0] <= varHelp[j - 1][k][5]);
 				}
 				else {
-					model.add(varHelp[j - 3][k][5] <= varHelp[j][k][0] - Tcd - Tdc - Tblow[j]);
+					model.add(varHelp[j - 3][k][5] <= varHelp[j][k][0] - Tcd - Tdc );
 				}
 
 
@@ -280,7 +278,7 @@ main(int argc)
 				for (int n = 0; n < o; n++){
 					output[j][k][n] = IloNumVarArray(env, 3);
 					for (int a = 0; a < 3; a++){
-						output[j][k][n][a] = IloNumVar(env, 0.0, IloInfinity);
+						output[j][k][n][a] = IloNumVar(env, 0.0, IloInfinity, "O");
 					}
 				}
 			}
@@ -337,6 +335,7 @@ main(int argc)
 		//populatebynonzero(model, varOutput, varHelp, cons, output);
 
 		IloCplex cplex(model);
+		cplex.exportModel("lpex3.lp");
 
 		// Optimize the problem and obtain solution.
 		if (!cplex.solve()) {
@@ -374,14 +373,20 @@ main(int argc)
 
 
 
-		cplex.exportModel("lpex3.lp");
+		//cplex.exportModel("lpex3.lp");
 
 		//write variables to txt file, comprehensive version
 		ofstream myfile;
 		myfile.open("SolutionProgramComplete.txt");
 		myfile << "Output of program:\n \n";
-		myfile << "Objective value: total cost for all spoons (scrap value): " << cplex.getObjValue() << "\n\n";
+		myfile << "Objective value: total cost for all spoons (scrap value and time late +small others): " << cplex.getObjValue() << "\n\n";
 		myfile << "\nTotal loading time = " << totalLoadingTime << "\n";
+		myfile << "\nTime late for each load and spoon:\n";
+		for (int j = current; j < J + current; j++){
+			cplex.getValues(vals, timeLate[j]);
+			myfile << "Load " << j << ": " << vals << "\n";
+		}
+
 		myfile << "Available seconds for loading each (j,k): \n";
 		for (int j = current; j < J + current; j++){
 			cplex.getValues(vals, varOutput[j]);
