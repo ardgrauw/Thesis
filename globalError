@@ -170,13 +170,8 @@ main(int argc)
 				model.add(varHelp[j][k][5] - varHelp[j][k][4] >= 0);
 
 				//constraint 2: Tj>=Td2a + Tdc + Tblow
-				if (whereToLoad[k] == 0){
-					model.add(varHelp[j - 2][k][5] <= varHelp[j][k][0] - Tcd - Tdc);
-					model.add(varHelp[j][k][0] <= varHelp[j - 1][k][5]);
-				}
-				else {
-					model.add(varHelp[j - 3][k][5] <= varHelp[j][k][0] - Tcd - Tdc);
-				}
+				model.add(varHelp[j - a[whereToLoad[k]]][k][5] <= varHelp[j][k][0] - Tcd - Tdc);
+				model.add(varHelp[j][k][0] <= varHelp[j-1][k][5]);
 
 
 				//constraint 3: Td2b = Tfa+Tfd
