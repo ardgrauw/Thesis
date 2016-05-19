@@ -1,12 +1,12 @@
 // Timing.cpp : Defines the entry point for the console application.
 //
 
+
 // basic file operations
 #include <iostream>
 #include <fstream>
 using namespace std;
 
-#include "stdafx.h"
 
 #include <ilcplex/ilocplex.h>
 ILOSTLBEGIN
@@ -23,6 +23,8 @@ typedef IloArray<ConstraintMatrix> Constraint3Matrix;
 
 
 static void populatebynonzero(IloModel model, NumVarMatrix varOutput, NumVar3Matrix varHelp, Range3Matrix con, NumVar4Matrix output);
+
+//constants
 
 const int I = 10; // how many types of scrap are considered
 const int J = 10; // how many loads should be considered
@@ -63,6 +65,7 @@ static double residualsMax[M] = { 150000, 130000, 200000, 150000, 180000, 250000
 static double totalWeight[M] = { 80, 80, 80, 80, 80, 80, 80, 80, 80, 80, 80, 80, 80, 80, 80 };
 static double currentStock[K][I] = { { 200, 50, 100, 30, 150, 25, 40, 75, 40, 100 }, { 150, 25, 40, 75, 40, 100, 50, 100, 30, 150 } };
 static double maxStock = 1000;
+static double incomingScrap[J][I] = { 0 };
 
 
 //output parameters
@@ -100,6 +103,7 @@ main(int argc)
 		NumVar3Matrix varWeights(env, J + current);
 		NumVar3Matrix varSelection(env, J + current);
 		NumVar3Matrix varAvailable(env, J + current);
+		NumVar3Matrix varRefill(env, J + current);
 		Range3Matrix cons(env, J + current);
 
 		//output variables
@@ -116,6 +120,7 @@ main(int argc)
 			varWeights[j] = NumVarMatrix(env, K);
 			varSelection[j] = NumVarMatrix(env, K);
 			varAvailable[j] = NumVarMatrix(env, K);
+			varRefill[j] = NumVarMatrix(env, K);
 			for (int k = 0; k < K; k++){
 				varOutput[j][k] = IloNumVar(env, 0.0, IloInfinity);
 				varHelp[j][k] = IloNumVarArray(env, L);
@@ -123,6 +128,7 @@ main(int argc)
 				varWeights[j][k] = IloNumVarArray(env, I);
 				varSelection[j][k] = IloNumVarArray(env, I);
 				varAvailable[j][k] = IloNumVarArray(env, I);
+				varRefill[j][k] = IloNumVarArray(env, I);
 				for (int l = 0; l < L; l++){
 					varHelp[j][k][l] = IloNumVar(env, 0.0, IloInfinity);
 				}
@@ -130,6 +136,7 @@ main(int argc)
 					varWeights[j][k][i] = IloNumVar(env, 0.0, IloInfinity);
 					varSelection[j][k][i] = IloIntVar(env, 0, 1);
 					varAvailable[j][k][i] = IloNumVar(env, 0.0, IloInfinity);
+					varRefill[j][k][i] = IloNumVar(env, 0.0, IloInfinity);
 				}
 			}
 		}
@@ -207,7 +214,7 @@ main(int argc)
 					}
 					else{
 						//update stock levels
-						model.add(varAvailable[j][k][i] == varAvailable[j - 1][k][i] - varWeights[j - 1][k][i]);//if stock filling: + x[j][k][i]
+						model.add(varAvailable[j][k][i] == varAvailable[j - 1][k][i] - varWeights[j - 1][k][i]+varRefill[j][k][i]);//if stock filling: + x[j][k][i]
 					}
 					//calculate total loading time
 					sumLoadingTime = sumLoadingTime + varWeights[j][k][i] / LoadingSpeed[k][i];
@@ -219,6 +226,9 @@ main(int argc)
 					sumResiduals = sumResiduals + varWeights[j][k][i] * residuals[i];
 					//calculate total weight
 					sumWeight = sumWeight + varWeights[j][k][i];
+					//refilled scrap should be equal to what comes in
+					if (k==0)
+						model.add(varRefill[j][0][i] + varRefill[j][1][i] == incomingScrap[j][i]);//nog aanvullen
 				}
 				//loading time constraint
 				model.add(sumLoadingTime * 60 <= varOutput[j][k]);
