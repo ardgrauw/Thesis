@@ -36,7 +36,7 @@ static double Tslack = 180; //slack time or margin time for all spoons
 static int a[2] = { 2, 3 }; //differentiating between filling places for a certain constraint
 static int b[2] = { 1, 2 }; //differentiating between filling places for a certain constraint
 
-static double Tdc = 180; // driving time from drop-off to convertor (could be split up for both convertors)
+static double Tdc = 240; // driving time from drop-off to convertor, including loading (could be split up for both convertors)
 static double Tcd = 180; // driving time from convertor to drop-off (could be split up for both convertors)
 static double Tdf[2] = { 60, 300 }; // driving time from drop-off to the filling area (hall, dockside)
 static double Tfd[2] = { 60, 420 }; // driving time from the filling area to drop-off (hall, dockside)
@@ -46,7 +46,7 @@ static double TloadMin[2] = { 780, 900 }; //minimal number of seconds that is re
 
 //test parameters
 int current = 4;
-static int T[M] = { 0, 1440, 2760, 5400, 6720, 8040, 9360, 10680, 12000, 13320, 15240, 16980, 18540, 20400, 21720 };
+static int T[M] = { 0, 1440, 2760, 5400, 6720, 7800, 8560, 10080, 12000, 13320, 15240, 16980, 18540, 20400, 21720 };
 static int Tblow[M] = { 60, 60, 60, 60, 60, 60, 60, 60, 60, 60, 60, 60, 60, 60, 60 };
 static int whereToLoad[K] = { 0, 1 };
 
@@ -55,8 +55,8 @@ int pastTimes[M][K][L] = { 0 };
 
 //parmeters considering the types of scrap
 static double LoadingSpeed[K][I] = { { 2.59, 2.22, 1.49, 2.13, 2.85, 1.22, 2.62, 2.86, 2.22, 2.81 }, { 0.61, 2.58, 1.07, 2.67, 1.04, 2.09, 2.54, 1.85, 1.96, 2.34 } }; // loading speed in tonnes/min
-static double minScrap = 1; // at least 1 tonne should be chosen (if the type is chosen)
-static double maxScrap = 50; // max scrap to be chosen, for big M constraint
+static double minScrap = 0.5; // at least 1 tonne should be chosen (if the type is chosen)
+static double maxScrap = 30; // max scrap to be chosen, for big M constraint
 static double sulfur[I] = { 100, 100, 150, 150, 200, 300, 300, 350, 350, 500 }; //concentration of sulfur per scrap type i (per ton)
 static double residuals[I] = { 850, 850, 900, 1100, 1150, 1150, 1600, 2000, 3500, 5000 }; //concentration of residuals per scrap type i (per ton)
 static double price[I] = { 10, 9, 8, 8, 7, 6.5, 6, 5, 4.5, 4 }; // price for one tonne of steel of scrap type i
@@ -69,12 +69,13 @@ static double maxStock = 100000;
 static double incomingScrap[M][I] = { 0 };
 static double density[I] = {0.5, 1, 1.3, 1.25, 0.75, 0.65, 0.85, 0.5, 0.70, 1};
 static double spoonWeightMax = 50;
-static double spoonVolumeMax = 60;
+static double spoonVolumeMax = 70;
 
 
 //output parameters
 const int o = 5;
 static string out[o] = { "LK103", "LK106", "Terberg1", "Terberg2", "MobileCrane" };
+double machineUtilisation[o] = { 0 }; //KPI's for machines, find bottleneck
 
 //
 
@@ -351,7 +352,7 @@ main(int argc)
 		}
 
 		IloNumArray vals(env);
-		IloNumVar val(env);
+		IloNum  val;
 		IloNum totalLoadingTime = 0;
 
 
@@ -363,18 +364,12 @@ main(int argc)
 			cplex.getValues(vals, varOutput[j]);
 			totalLoadingTime += vals[0] + vals[1];
 			env.out() << "Seconds for load " << j << "       = " << vals << endl;
-			/*for (int k = 0; k < K; k++){
-			TimeAvailable[j][k] = cplex.getValue(varOutput[j][k]);
-			}*/
 		}
 		env.out() << "\nTotal loading time = " << totalLoadingTime << "\n";
 		for (int j = current; j < current + J; j++){
 			for (int k = 0; k < K; k++){
 				cplex.getValues(vals, varHelp[j][k]);
 				env.out() << "Time instances for spoon " << k << " in load " << j << " = " << vals << endl;
-				/*for (int l = 0; l < L; l++){
-				TimeInstances[j][k][l] = cplex.getValue(varHelp[j][k][l]);
-				}*/
 			}
 		}
 
@@ -405,13 +400,39 @@ main(int argc)
 		}
 		myfile << "\nDifferent machines: used time, begin and end:\n";
 		for (int i = 0; i < o; i++){
+			double sum[o] = { 0 };
+			double begin[o] = { 0 };
+			double end[o] = { 0 };
 			for (int j = current; j < J + current; j++){
-				if (((i == 2 && j % 2 == 1) || (i == 3 && j % 2 == 0)) == false){
-					cplex.getValues(vals, output[j][0][i]);
-					myfile << "Machine " << i << ", load " << j << ": " << vals << "\n";
+				if (whereToLoad[1] == 1){
+					if (((i == 2 && j % 2 == 1) || (i == 3 && j % 2 == 0)) == false){
+						cplex.getValues(vals, output[j][0][i]);
+						myfile << "Machine " << out[i] << ", load " << j << ": " << vals << "\n";
+						if (begin[i] == 0){
+							begin[i] = vals[1];
+						}
+						end[i] = vals[2];
+						sum[i] += vals[0];
+					}
+				}
+				else if (whereToLoad[1] == 0){
+					if (i != 3){
+						cplex.getValues(vals, output[j][0][i]);
+						myfile << "Machine " << out[i] << ", load " << j << ": " << vals << "\n";
+						if (begin[i] == 0){
+							begin[i] = vals[1];
+						}
+						end[i] = vals[2];
+						sum[i] += vals[0];
+					}
 				}
 			}
+			if (whereToLoad[1] == 1 || i != 3){
+				machineUtilisation[i] = sum[i] / (end[i] - begin[i]) * 100;
+				myfile << "Utilization (%): " << machineUtilisation[i] << "\n\n";
+			}
 		}
+
 		myfile << "\nWeight of different spoons:\n";
 		for (int j = current; j < J + current; j++){
 			for (int k = 0; k < K; k++){
@@ -425,7 +446,7 @@ main(int argc)
 		}
 		myfile.close();
 
-		//just write away raw data to analyse further
+		/*//just write away raw data to analyse further
 		myfile.open("SolutionRawData.txt");
 		//available seconds
 		for (int j = current; j < J + current; j++){
@@ -458,7 +479,23 @@ main(int argc)
 				myfile << vals << "\n";
 			}
 		}
-		myfile.close();
+		myfile.close();*/
+
+		//just write away raw data to analyse further
+		myfile.open("SolutionRawData.txt");
+		//available seconds
+		for (int j = current; j < J + current; j++){
+			for (int k = 0; k < K; k++){
+				cplex.getValues(vals, varHelp[j][k]);
+				//myfile << vals << "\n";
+				for (int l = 0; l < L; l++){
+					val = cplex.getValue(varHelp[j][k][l]);
+					myfile << IloRound(val) << " ";
+				}
+				myfile << T[j] << "\n";
+			}
+		}
+		myfile << "\n";
 
 	}
 	catch (IloException& e) {
