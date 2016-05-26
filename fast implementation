@@ -46,10 +46,10 @@ static int whereToLoad[2] = { 0, 1 }; // where to load each spoon: 0:hall, 1:doc
 // more things to adjust to make it possible to have other combinations then (0,1):
 // the different time constraints itself, not only the parameters (keep only 2 Terbergs for instance, hard, or add the LK 107)
 // ad the possibility to only use 1 spoon
-static int T[M] = { 0, 1440, 2760, 5400, 6720, 8040, 9360, 10680, 12000, 13320, 15240, 16980, 18540, 20400, 21720 };
+static int T[M] = { 0, 1440, 2760, 5400, 6720, 7800, 8560, 10080, 12000, 13320, 15240, 16980, 18540, 20400, 21720 };
 static int Tblow[M] = { 60, 60, 60, 60, 60, 60, 60, 60, 60, 60, 60, 60, 60, 60, 60 };
 static double StillToLoad[K][I] = { { 10, 0, 5, 0, 0, 0, 0, 2.5, 1, 0 }, { 0 } /*{ 0, 0, 2.5, 1, 0, 10, 0, 5, 0, 0 }*/ }; // how much tonnes there need to be loaded still for the current spoon
-static double LoadingSpeed[K][I] = { { 2.59, 2.22, 1.49, 2.13, 2.85, 1.22, 2.62, 2.86, 2.22, 2.81 }, { 0.61, 2.58, 1.07, 2.67, 1.04, 2.09, 2.54, 1.85, 1.96, 2.34 } }; // loading speed in tonnes/min
+static double LoadingSpeed[K][I] = { { 2.67,1.04,2.54,1.85,1.96,2.34,3.35,2.16,2.83,1.89 }, { 2.85,1.22,2.86,2.22,2.81,2.32,3.66,1.92,2.29,1.66 } }; // loading speed in tonnes/min
 static double LoadsByProd[M][K][I] = { 0 };
 
 
@@ -89,7 +89,7 @@ main(int argc)
 				if (k == 0)
 					LoadsByProd[j][k][i] = (rand() % 80) / 10;
 				else
-					LoadsByProd[j][k][i] = (rand() % 80) / 10;
+					LoadsByProd[j][k][i] = (rand() % 50) / 10;
 			}
 		}
 	}
@@ -382,8 +382,8 @@ main(int argc)
 		myfile.open("SolutionRawData.txt");
 		/*//available seconds
 		for (int j = current; j < J + current; j++){
-			cplex.getValues(vals, varOutput[j]);
-			myfile << vals << "\n";
+		cplex.getValues(vals, varOutput[j]);
+		myfile << vals << "\n";
 		}
 		myfile << "\n";*/
 		//available seconds
@@ -401,12 +401,12 @@ main(int argc)
 		myfile << "\n";
 		/*//machines: used time, begin and end
 		for (int i = 0; i < o; i++){
-			for (int j = current; j < J + current; j++){
-				if (((i == 2 && j % 2 == 1) || (i == 3 && j % 2 == 0)) == false){
-					cplex.getValues(vals, output[j][0][i]);
-					myfile << vals << "\n";
-				}
-			}
+		for (int j = current; j < J + current; j++){
+		if (((i == 2 && j % 2 == 1) || (i == 3 && j % 2 == 0)) == false){
+		cplex.getValues(vals, output[j][0][i]);
+		myfile << vals << "\n";
+		}
+		}
 		}*/
 		myfile.close();
 
@@ -422,4 +422,3 @@ main(int argc)
 	cin.get();
 	return 0;
 }  // END main
-
